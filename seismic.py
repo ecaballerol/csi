@@ -389,7 +389,7 @@ class seismic(SourceInv):
         self.lat  = []
         self.d = {}
         for sacfile in sacfiles:
-            sac = sacpy.sac()
+            sac = sacpy.Sac()
             sac.read(sacfile)
             self.lon.append(sac.stlo)
             self.lat.append(sac.stla)
@@ -506,7 +506,7 @@ class seismic(SourceInv):
             self.waveform_engine.Xs = copy.deepcopy(src_loc)
 
         # Assign receiver locations
-        assert self.waveform_engine.Xr != None, 'Recever locations must be assigned'
+        assert self.waveform_engine.Xr.all() != None, 'Recever locations must be assigned'
 
         # Go in dir_name
         cwd = os.getcwd()
