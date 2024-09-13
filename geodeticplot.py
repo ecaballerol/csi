@@ -352,7 +352,7 @@ class geodeticplot(object):
             * None
         '''
 
-        self.faille.set_title(titre, title=1.08)
+        self.faille.set_title(titre, y=1.08)
 
         # All done
         return
