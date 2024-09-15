@@ -1158,7 +1158,7 @@ class RectangularPatchesKin(RectangularPatches):
         print('Writing Kinematic GFs to directory {} for fault {}'.format(outputDir,self.name))
 
         # Check i_path
-        assert os.path.exists(outputDir), '%s: No such directory'%(i_path)
+        assert os.path.exists(outputDir), '%s: No such directory'%(outputDir)
         
         # Main loop
         G = self.G[data.name]
