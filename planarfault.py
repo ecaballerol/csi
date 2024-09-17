@@ -77,7 +77,7 @@ class planarfault(RectangularPatches):
         # All done
         return
 
-    def buildPatches(self, lon, lat, dep, strike, dip, f_length, f_width, n_strike, n_dip, verbose=True, discretize=True):
+    def buildPatches(self, lon, lat, dep, strike, dip, f_length, f_width, n_strike, n_dip, leading='strike',verbose=True, discretize=True):
         '''
         Builds a dipping fault.
         Args:
@@ -125,81 +125,158 @@ class planarfault(RectangularPatches):
         
         # set a marker
         D = [self.top]
-        
-        # Loop over the depths
-        for i in range(self.numz):
-            
-            # Get the top of the row
-            xt = self.xi
-            yt = self.yi
-            zt = self.zi
-            lont = self.loni
-            latt = self.lati
-            
-            # Compute the bottom row
-            xb = xt + p_width * np.cos(dip_rad) * np.sin(dipdirection_rad)
-            yb = yt + p_width * np.cos(dip_rad) * np.cos(dipdirection_rad)
-            lonb, latb = self.xy2ll(xb, yb)
-            zb = zt + p_width*np.sin(dip_rad)
-            # fill D
-            D.append(zb.max())
-            
-            # Build the patches by linking the points together
-            for j in range(xt.shape[0]-1):
-                # 1st corner
-                x1 = xt[j]
-                y1 = yt[j]
-                z1 = zt[j]
-                lon1 = lont[j]
-                lat1 = latt[j]
-                # 2nd corner
-                x2 = xt[j+1]
-                y2 = yt[j+1]
-                z2 = zt[j+1]
-                lon2 = lont[j+1]
-                lat2 = latt[j+1]
-                # 3rd corner
-                x3 = xb[j+1]
-                y3 = yb[j+1]
-                z3 = zb[j+1]
-                lon3 = lonb[j+1]
-                lat3 = latb[j+1]
-                # 4th corner 
-                x4 = xb[j]
-                y4 = yb[j]
-                z4 = zb[j]
-                lon4 = lonb[j]
-                lat4 = latb[j]
-                # Set points
-                if y1>y2:
-                    p2 = [x1, y1, z1]; p2ll = [lon1, lat1, z1]
-                    p1 = [x2, y2, z2]; p1ll = [lon2, lat2, z2]
-                    p4 = [x3, y3, z3]; p4ll = [lon3, lat3, z3]
-                    p3 = [x4, y4, z4]; p3ll = [lon4, lat4, z4]
-                else:
-                    p1 = [x1, y1, z1]; p1ll = [lon1, lat1, z1]
-                    p2 = [x2, y2, z2]; p2ll = [lon2, lat2, z2]
-                    p3 = [x3, y3, z3]; p3ll = [lon3, lat3, z3]
-                    p4 = [x4, y4, z4]; p4ll = [lon4, lat4, z4]
-                # Store these
-                p = [p1, p2, p3, p4]
-                pll = [p1ll, p2ll, p3ll, p4ll]
-                p = np.array(p)
-                pll = np.array(pll)
-                # fill in the lists
-                self.patch.append(p)
-                self.patchll.append(pll)
-                self.slip.append([0.0, 0.0, 0.0])
-                self.patchdip.append(dip_rad)
-                # No equivalent patch calculation (patches are already rectangular)
-                self.equivpatch.append(p)
-                self.equivpatchll.append(pll)
+
+        if leading =='strike':
+            # Loop over the depths
+            for i in range(self.numz):
                 
-            # upgrade top patches coordinates
-            self.xi = xb
-            self.yi = yb
-            self.zi = zb
-            self.loni, self.lati = self.xy2ll(xb,yb)            
+                # Get the top of the row
+                xt = self.xi
+                yt = self.yi
+                zt = self.zi
+                lont = self.loni
+                latt = self.lati
+                
+                # Compute the bottom row
+                xb = xt + p_width * np.cos(dip_rad) * np.sin(dipdirection_rad)
+                yb = yt + p_width * np.cos(dip_rad) * np.cos(dipdirection_rad)
+                lonb, latb = self.xy2ll(xb, yb)
+                zb = zt + p_width*np.sin(dip_rad)
+                # fill D
+                D.append(zb.max())
+                
+                # Build the patches by linking the points together
+                for j in range(xt.shape[0]-1):
+                    # 1st corner
+                    x1 = xt[j]
+                    y1 = yt[j]
+                    z1 = zt[j]
+                    lon1 = lont[j]
+                    lat1 = latt[j]
+                    # 2nd corner
+                    x2 = xt[j+1]
+                    y2 = yt[j+1]
+                    z2 = zt[j+1]
+                    lon2 = lont[j+1]
+                    lat2 = latt[j+1]
+                    # 3rd corner
+                    x3 = xb[j+1]
+                    y3 = yb[j+1]
+                    z3 = zb[j+1]
+                    lon3 = lonb[j+1]
+                    lat3 = latb[j+1]
+                    # 4th corner 
+                    x4 = xb[j]
+                    y4 = yb[j]
+                    z4 = zb[j]
+                    lon4 = lonb[j]
+                    lat4 = latb[j]
+                    # Set points
+                    if y1>y2:
+                        p2 = [x1, y1, z1]; p2ll = [lon1, lat1, z1]
+                        p1 = [x2, y2, z2]; p1ll = [lon2, lat2, z2]
+                        p4 = [x3, y3, z3]; p4ll = [lon3, lat3, z3]
+                        p3 = [x4, y4, z4]; p3ll = [lon4, lat4, z4]
+                    else:
+                        p1 = [x1, y1, z1]; p1ll = [lon1, lat1, z1]
+                        p2 = [x2, y2, z2]; p2ll = [lon2, lat2, z2]
+                        p3 = [x3, y3, z3]; p3ll = [lon3, lat3, z3]
+                        p4 = [x4, y4, z4]; p4ll = [lon4, lat4, z4]
+                    # Store these
+                    p = [p1, p2, p3, p4]
+                    pll = [p1ll, p2ll, p3ll, p4ll]
+                    p = np.array(p)
+                    pll = np.array(pll)
+                    # fill in the lists
+                    self.patch.append(p)
+                    self.patchll.append(pll)
+                    self.slip.append([0.0, 0.0, 0.0])
+                    self.patchdip.append(dip_rad)
+                    # No equivalent patch calculation (patches are already rectangular)
+                    self.equivpatch.append(p)
+                    self.equivpatchll.append(pll)
+                    
+                # upgrade top patches coordinates
+                self.xi = xb
+                self.yi = yb
+                self.zi = zb
+                self.loni, self.lati = self.xy2ll(xb,yb)  
+        elif leading=='dip':
+           
+            # Loop over the strike length
+            for j in range(self.xi.shape[0]-1):
+                xt = copy.deepcopy(self.xi)
+                yt = copy.deepcopy(self.yi)
+                zt = copy.deepcopy(self.zi)
+                lont = copy.deepcopy(self.loni)
+                latt = copy.deepcopy(self.lati)
+
+                # Loop over the depth
+                for i in range(self.numz):  
+                    # Compute the bottom row
+                    xb = xt + p_width * np.cos(dip_rad) * np.sin(dipdirection_rad)
+                    yb = yt + p_width * np.cos(dip_rad) * np.cos(dipdirection_rad)
+                    lonb, latb = self.xy2ll(xb, yb)
+                    zb = zt + p_width*np.sin(dip_rad)  
+                     # fill D
+                    if j==0:
+                        D.append(zb.max())
+                    # Build the patches by linking the points together
+                    # 1st corner
+                    x1 = xt[j]
+                    y1 = yt[j]
+                    z1 = zt[j]
+                    lon1 = lont[j]
+                    lat1 = latt[j]
+                    # 2nd corner
+                    x2 = xt[j+1]
+                    y2 = yt[j+1]
+                    z2 = zt[j+1]
+                    lon2 = lont[j+1]
+                    lat2 = latt[j+1]
+                    # 3rd corner
+                    x3 = xb[j+1]
+                    y3 = yb[j+1]
+                    z3 = zb[j+1]
+                    lon3 = lonb[j+1]
+                    lat3 = latb[j+1]
+                    # 4th corner 
+                    x4 = xb[j]
+                    y4 = yb[j]
+                    z4 = zb[j]
+                    lon4 = lonb[j]
+                    lat4 = latb[j]
+                    # Set points
+                    if y1>y2:
+                        p2 = [x1, y1, z1]; p2ll = [lon1, lat1, z1]
+                        p1 = [x2, y2, z2]; p1ll = [lon2, lat2, z2]
+                        p4 = [x3, y3, z3]; p4ll = [lon3, lat3, z3]
+                        p3 = [x4, y4, z4]; p3ll = [lon4, lat4, z4]
+                    else:
+                        p1 = [x1, y1, z1]; p1ll = [lon1, lat1, z1]
+                        p2 = [x2, y2, z2]; p2ll = [lon2, lat2, z2]
+                        p3 = [x3, y3, z3]; p3ll = [lon3, lat3, z3]
+                        p4 = [x4, y4, z4]; p4ll = [lon4, lat4, z4]
+                    # Store these
+                    p = [p1, p2, p3, p4]
+                    pll = [p1ll, p2ll, p3ll, p4ll]
+                    p = np.array(p)
+                    pll = np.array(pll)
+                    # fill in the lists
+                    self.patch.append(p)
+                    self.patchll.append(pll)
+                    self.slip.append([0.0, 0.0, 0.0])
+                    self.patchdip.append(dip_rad)
+                    # No equivalent patch calculation (patches are already rectangular)
+                    self.equivpatch.append(p)
+                    self.equivpatchll.append(pll)
+                    
+                    # upgrade top patches coordinates
+                    xt = xb
+                    yt = yb
+                    zt = zb
+                    lont, latt = self.xy2ll(xb,yb)  
+
 
         # set depth
         D = np.array(D)
