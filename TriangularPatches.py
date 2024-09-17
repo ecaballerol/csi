@@ -595,6 +595,7 @@ class TriangularPatches(Fault):
                 self.index_parameter.append([int(A[i].split()[ipatch]),int(A[i].split()[ipatch+1]),int(A[i].split()[ipatch+2])])
             # Get the slip value
             if not donotreadslip:
+                ipatch = 4
                 if len(A[i].split())>7:
                     slip = np.array([float(A[i].split()[ipatch+4]), float(A[i].split()[ipatch+5]), float(A[i].split()[ipatch+6])])
                 else:
@@ -603,7 +604,10 @@ class TriangularPatches(Fault):
             # get the values
             if inputCoordinates in ('lonlat'):
                 # all three vertices on one line
-                lon1, lat1, z1, lon2, lat2, z2, lon3, lat3, z3 = A[i].split()
+                if len(A[i].split())>8:
+                    lon1, lat1, z1, lon2, lat2, z2, lon3, lat3, z3 = A[i].split()[:9]
+                else:
+                    lon1, lat1, z1, lon2, lat2, z2, lon3, lat3, z3 = A[i].split()
                 # Pass as floating point
                 lon1 = float(lon1); lat1 = float(lat1); z1 = float(z1)
                 lon2 = float(lon2); lat2 = float(lat2); z2 = float(z2)
