@@ -9,11 +9,13 @@ import numpy as np
 import pyproj as pp
 import matplotlib.pyplot as plt
 import scipy.interpolate as sciint
+import scipy.signal as signal
 from scipy.linalg import block_diag
 import copy
 import sys
 import os
 import shutil
+import sacpy
 
 ## Personals
 major, minor, micro, release, serial = sys.version_info
@@ -229,7 +231,7 @@ class planarfaultkinematic(planarfault):
 
 
     def buildKinGFs(self, data, Mu, rake, slip=1., rise_time=2., stf_type='triangle', 
-                    rfile_name=None, out_type='D', verbose=True, ofd=sys.stdout, efd=sys.stderr):
+                    rfile_name=None, out_type='D', filter_coef=None, verbose=True, ofd=sys.stdout, efd=sys.stderr):
         '''
         Build Kinematic Green's functions based on the discretized fault. Green's functions will be calculated 
         for a given shear modulus and a given slip (cf., slip) along a given rake angle (cf., rake)
@@ -242,6 +244,7 @@ class planarfaultkinematic(planarfault):
             * stf_type:   Type of STF pulse
             * rfile_name: User specified stf file name if stf_type='rfile'
             * out_type:   'D' for displacement, 'V' for velocity, 'A' for acceleration
+            * filter_coef   : Array or dictionnary of second-order filter coefficients (optional), see scipy.signal.sosfilt
             * verbose:    True or False
         '''
 
@@ -254,11 +257,11 @@ class planarfaultkinematic(planarfault):
             print ("Building Green's functions for the data set {} of type {}".format(data.name, data.dtype))
             print ("Using waveform engine: {}".format(data.waveform_engine.name))
         
-
+        
         # Loop over each patch
         Np = len(self.patch)
         rad2deg = 180./np.pi
-        if not self.G.has_key(data.name):
+        if data.name not in self.G:
             self.G[data.name] = {}
         self.G[data.name][rake] = []
         G = self.G[data.name][rake]
@@ -282,8 +285,22 @@ class planarfaultkinematic(planarfault):
             data.calcSynthetics('GF_tmp',p_strike_deg,p_dip_deg,rake,M0,rise_time,stf_type,rfile_name,
                                 out_type,src_loc,cleanup=True,ofd=ofd,efd=efd)
         
-            # Assemble GFs
-            G.append(copy.deepcopy(data.waveform_engine.synth))
+            # GFs filtering
+            if filter_coef is not None:
+                sos = filter_coef
+                statmp = copy.deepcopy(data.waveform_engine.synth)
+                for ist in statmp.keys():
+                   for ic in statmp[ist]:
+                       print(ist,ic)
+                       statmp[ist][ic].depvar = signal.sosfilt(sos,statmp[ist][ic].depvar)
+                # Assemble GFs
+                G.append(statmp)
+            else:
+                # Assemble GFs
+                G.append(copy.deepcopy(data.waveform_engine.synth))
+                
+            
+            
         sys.stdout.write('\n')
 
         # All done
@@ -470,9 +487,186 @@ class planarfaultkinematic(planarfault):
                     w[s][c].depvar = filtFunc(b,a,w[s][c].depvar)
 
         # All done
-        return        
-        
+        return      
 
+
+    def GFwindow(self,data):
+        '''
+        Function to window the GFs from fault, according to 
+        data
+        data:  Seismic object 
+        '''  
+        print ("Windowing GFs according to data {}"\
+               .format(data.name))
+        
+        assert data.name in self.G.keys(), 'GFs not build for this dataset'
+
+        G = self.G[data.name]
+        for irake in G.keys():
+            for ip in range(len(self.patch)):
+                for ista in G[irake][ip]:
+                    
+                    o_sac = G[irake][ip][ista]
+                    b = data.d[ista].b - data.d[ista].o
+                    npts = data.d[ista].npts
+                    t = np.arange(o_sac.npts)*o_sac.delta+o_sac.b-o_sac.o
+                    dtb = np.absolute(t-b)
+                    ib  = np.where(dtb==dtb.min())[0][0]
+                    assert np.absolute(dtb[ib])<o_sac.delta,'Incomplete GFs'                
+                    o_sac.depvar = o_sac.depvar[ib:ib+npts]
+                    # Sac headers
+                    o_sac.kstnm  = data.d[ista].kstnm
+                    o_sac.kcmpnm = data.d[ista].kcmpnm
+                    o_sac.knetwk = data.d[ista].knetwk
+                    o_sac.khole  = data.d[ista].khole
+                    o_sac.stlo   = data.d[ista].stlo
+                    o_sac.stla   = data.d[ista].stla
+                    o_sac.npts   = npts
+                    o_sac.b      = t[ib]+o_sac.o
+
+        return
+    
+    def setBigDmap(self,seismic_data):
+            '''
+            Assign data_idx map for kinematic data
+
+            Args:
+                * seismic_data      : Data to take care of
+
+            Returns:
+                * None
+            '''
+            if type(seismic_data) != list:
+                data_list = [seismic_data]
+            else:
+                data_list = seismic_data
+                
+            # Set the data index map
+            d1 = 0
+            d2 = 0        
+            self.bigD_map = {}
+            for data in data_list:
+                for dkey in data.sta_name:
+                    d2 += data.d[dkey].npts
+                self.bigD_map[data.name]=[d1,d2]
+                d1 = d2
+            # All done
+            return
+    # ----------------------------------------------------------------------
+    def buildBigGD(self,eik_solver,seismic_data,rakes,vmax,Nt,Dt,
+                        rakes_key=None,dtype='np.float64',
+                        fastsweep=False,indexing='Altar'):
+        '''
+        Build BigG and bigD matrices from Green's functions and data dictionaries
+
+        Args:
+            * eik_solver: Eikonal solver (e.g., FastSweep or None)
+            * data:       Seismic data object or list of objects
+            * rakes:      List of rake angles
+            * vmax:       Maximum rupture velocity
+            * Nt:         Number of rupture time-steps
+            * Dt:         Rupture time-steps
+
+        Kwargs:
+            * rakes_key:  If GFs are stored under different keywords than rake value, provide them here
+            * fastsweep:  If True and vmax is set, solves min arrival time using fastsweep algo. If false, uses analytical solution.
+
+        Returns:
+            * tmin:       Array of ???
+        '''
+
+        if type(seismic_data) != list:
+            data_list = [seismic_data]
+        else:
+            data_list = seismic_data
+           
+        # set rake keywords for dictionnary
+        if rakes_key is None:
+            rakes_key = rakes
+         
+        # Set eikonal solver grid for vmax
+        Np = len(self.patch)
+        if vmax != np.inf and vmax > 0.:
+            vr = copy.deepcopy(self.vr)
+            self.vr[:] = vmax 
+            if fastsweep and (eik_solver is not None): # Uses fastsweep
+                eik_solver.setGridFromFault(self,1.0)
+                eik_solver.fastSweep()
+                self.vr[:] = copy.deepcopy(vr)
+        
+                # Get tmin for each patch
+                tmin = []
+                for p in range(Np):
+                    # Location at the patch center
+                    dip_c, strike_c = self.getHypoToCenter(p,True)
+                    tmin.append(eik_solver.getT0([dip_c],[strike_c])[0])
+
+            else: # Uses analytical solution
+                # Get tmin for each patch
+                tmin = []
+                for p in range(Np):
+                    dip_c, strike_c = self.getHypoToCenter(p,True)
+                    tmin.append(np.sqrt(dip_c**2+strike_c**2)/vmax)                    
+        else:
+            tmin = np.zeros((Np,))
+
+        
+        # Build up bigD
+        self.bigD = []
+        for data in data_list:
+            for dkey in data.sta_name:
+                self.bigD.extend(data.d[dkey].depvar)
+        self.bigD = np.array(self.bigD)
+        
+        # Build Big G matrix
+        self.bigG = np.zeros((len(self.bigD),Nt*Np*len(rakes_key)))
+        j  = 0
+        if indexing == 'Altar':
+            for nt in range(Nt):
+                #print('Processing %d'%(nt))
+                for r in rakes_key:
+                    for p in range(Np):                    
+                        di = 0
+                        for data in data_list:
+                            for dkey in data.sta_name:
+                                if isinstance (self.G[data.name][r][p][dkey],sacpy.sac.Sac):
+                                    depvar = self.G[data.name][r][p][dkey].depvar
+                                    npts   = self.G[data.name][r][p][dkey].npts
+                                    delta  = self.G[data.name][r][p][dkey].delta
+                                    its = int(np.round((tmin[p] + nt * Dt)/delta,0)) 
+                                    i = its + di     
+                                    l = npts - its
+                                    if l>0:
+                                        self.bigG[i:i+l,j] = depvar[:l]                        
+                                    di += npts
+                        j += 1
+
+        return tmin
+    def buildBigCd(self,seismic_data):
+            '''
+            Assemble Cd from multiple kinematic datasets
+
+            Args:
+                * seismic_data      : Data to take care of
+
+            Returns:
+                * None
+            '''
+            assert self.bigD is not None, 'bigD must be assigned'
+            assert self.bigD_map is not None, 'bigD_map must be assigned (use setbigDmap)'
+            self.bigCd = np.zeros((self.bigD.size,self.bigD.size))
+
+            if type(seismic_data) != list:
+                data_list = [seismic_data]
+            else:
+                data_list = seismic_data
+                
+            for data in data_list:
+                i = self.bigD_map[data.name]
+                self.bigCd[i[0]:i[1],i[0]:i[1]] = data.Cd
+            # All done return
+            return
+    
     def saveKinGFs(self, data, o_dir='gf_kin'):
         '''
         Writing Green's functions (1 sac file per channel per patch for each rake)
@@ -491,7 +685,7 @@ class planarfaultkinematic(planarfault):
                 for s in G[r][p]: # station name (string)
                     for c in G[r][p][s]: # component name (string)
                         o_file = os.path.join(o_dir,'gf_rake%d_patch%d_%s_%s.sac'%(r,p,s,c))
-                        G[r][p][s][c].write(o_file)
+                        G[r][p][s][c].wsac(o_file)
         
         # Write list of stations
         f = open(os.path.join(o_dir,'stat_list'),'w')
@@ -502,7 +696,7 @@ class planarfaultkinematic(planarfault):
         # All done
         return
 
-    def loadKinGFs(self, data, rake=[0,90],i_dir='gf_kin',station_file=None):
+    def loadKinGFs(self, data, rake=[0,90],i_dir='gf_kin',station_file=None,components='all'):
         '''
         Reading Green's functions (1 sac file per channel per patch for each rake)
         Args:
@@ -510,6 +704,8 @@ class planarfaultkinematic(planarfault):
             rake       : List of rake values (default=0 and 90 deg)
             i_dir      : Output directory name (default='gf_kin')
             station_file: read station list from 'station_file'
+            components : Decide whether or not load all the components, 
+                        if not, it reads the component and name from data.d (use for real data)
         '''
         
         # Import sac for python (ask Zach)
@@ -539,11 +735,21 @@ class planarfaultkinematic(planarfault):
                 G[r].append({})
                 for s in sta_name: # station name (string)
                     G[r][p][s] = {}
-                    for c in ['Z','N','E']: # component name (string)
-                        i_file = os.path.join(i_dir,'gf_rake%d_patch%d_%s_%s.sac'%(r,p,s,c))
+                    if components=='all':
+                        for c in ['Z','N','E']: # component name (string)
+                            i_file = os.path.join(i_dir,'gf_rake%d_patch%d_%s_%s.sac'%(r,p,s,c))
+                            if os.path.exists(i_file):                            
+                                G[r][p][s][c] = sacpy.Sac()
+                                G[r][p][s][c].read(i_file)
+                            else:
+                                print('Skipping GF for {} {}'.format(s,c))
+                    elif components=='individual':
+                        c = data.d[s].kcmpnm[-1]
+                        sGF= data.d[s].kstnm
+                        i_file = os.path.join(i_dir,'gf_rake%d_patch%d_%s_%s.sac'%(r,p,sGF,c))
                         if os.path.exists(i_file):                            
-                            G[r][p][s][c] = sacpy.sac()
-                            G[r][p][s][c].read(i_file)
+                            G[r][p][s] = sacpy.Sac()
+                            G[r][p][s].read(i_file)
                         else:
                             print('Skipping GF for {} {}'.format(s,c))
 
@@ -613,6 +819,79 @@ class planarfaultkinematic(planarfault):
                     print('Skipping Data for {} {}'.format(s,c))                    
         # All done
         return
+    
+    def writeFaults2File(self, filename, slip=None, scale=1.0):
+        '''
+        Write the patch center coordinates in an ascii file with the format use 
+        in RectangularPatchesKin
+        the file format is so that it can by used directly in psxyz (GMT).
 
+        Args:
+            * filename      : Name of the file.
+
+        Kwargs:
+            * slip          : Put the slip as a value for the color. Can be None, strikeslip, dipslip, total, coupling
+            * scale         : Multiply the slip value by a factor.
+
+        Retunrs:
+            * None
+        '''
+
+        # Check size
+        if self.N_slip!=None and self.N_slip!=len(self.patch):
+            raise NotImplementedError('Only works for len(slip)==len(patch)')
+
+
+        # Write something
+        print('Writing geometry to file {}'.format(filename))
+
+        # Open the file
+        fout = open(filename, 'w')
+        
+        #Read Header
+        fout.write('#lon lat E[km] N[km] Dep[km] strike dip Area ID ')
+        # Loop over the patches
+        nPatches = len(self.patch)
+        for patch in self.patch:
+
+            # Get patch index
+            pIndex = self.getindex(patch)
+
+            # Get patch center
+            xc, yc, zc = self.getcenter(patch)
+            lonc, latc = self.xy2ll(xc, yc)
+
+            # Write the string to file
+            fout.write('{} {} {} {} \n'.format(lonc, latc, zc, slp[pIndex]))
+
+        # Close the file
+        fout.close()
+
+    def saveBigGD(self, bigDfile='kinematicG.data', bigGfile='kinematicG.gf', 
+                            dtype='np.float64'):
+            '''
+            Save bigG and bigD to binary file
+
+            Kwargs:
+                * bigDfile  : bigD filename (optional)
+                * bigGfile  : bigG gilename (optional)
+                * dtype     : Data binary type 
+
+            Returns:
+                * None
+            '''
+            
+            # Check bigG and bigD
+            assert self.bigD is not None or self.bigG is not None
+            assert bigDfile is not None or bigGfile is not None
+
+            # Write files
+            if bigDfile != None:
+                self.bigD.astype(dtype).tofile(bigDfile)
+            if bigGfile != None:
+                self.bigG.astype(dtype).T.tofile(bigGfile)
+            
+            # All done
+            return
 
 #EOF
