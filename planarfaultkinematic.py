@@ -136,8 +136,68 @@ class planarfaultkinematic(planarfault):
 
         # All done
         return
+    
+    def setMu(self,model_file,modelformat='CPS'):
+        '''
+        Set shear modulus values for seismic moment calculation
+        from model_file:
+
+        +------------------+--------------------------+
+        | if format = 'CPS'|Thickness, Vp, Vs, Rho    |
+        +==================+==========================+
+        | if format = 'KK' |file from Kikuchi Kanamori|
+        +------------------+--------------------------+
+
+        Args:
+            * model_file        : Input file
+
+        Kwargs:
+            * modelformat       : Format of the model file
+
+        Returns:
+            * None
+        '''
+
+        # Check modelformat
+        assert modelformat == 'CPS' or modelformat == 'KK', 'Incorrect model format (CPS or KK)'
         
-    def buildFault(self, lon, lat, dep, f_strike, f_dip, f_length, f_width, grid_size, p_nstrike, p_ndip):
+        # Read model file
+        mu = []
+        depth  = 0.
+        depths = []
+        L = open(model_file).readlines()
+        hdr = L[:12]
+        NL = 0
+        H = []; Vp = []; Vs = []; Rho = []; Qp = []; Qs = []
+        for l in L[12:]:
+            if not len(l.strip().split()):
+                break
+            items = l.strip().split()
+            H.append(float(items[0]))
+            Vp.append(float(items[1]))
+            Vs.append(float(items[2]))
+            Rho.append(float(items[3]))
+            Qp.append(float(items[4]))
+            Qs.append(float(items[5]))
+            mu.append(Vs[-1]*Vs[-1]*Rho[-1]*1.0e9)
+            depths.append([depth,depth+H[-1]])
+            depth += H[-1]
+            NL += 1
+                   
+        Nd = len(depths)
+        Np = len(self.patch)        
+        # Set Mu for each patch
+        self.mu = np.zeros((Np,))
+        for p in range(Np):
+            p_x, p_y, p_z, width, length, strike_rad, dip_rad = self.getpatchgeometry(p,center=True)
+            for d in range(Nd):
+                if p_z>=depths[d][0] and p_z<depths[d][1]:
+                    self.mu[p] = mu[d]
+
+        # All done
+        return
+        
+    def buildFault(self, lon, lat, dep, f_strike, f_dip, f_length, f_width, grid_size, p_nstrike, p_ndip,leading='strike'):
         '''
         Build fault patches/grid
         Args:
@@ -171,7 +231,7 @@ class planarfaultkinematic(planarfault):
 
                     
         # build patches
-        self.buildPatches(lon, lat, dep, f_strike, f_dip, self.f_length, self.f_width, self.f_nstrike, self.f_ndip)
+        self.buildPatches(lon, lat, dep, f_strike, f_dip, self.f_length, self.f_width, self.f_nstrike, self.f_ndip,leading)
         
         # build subgrid
         self.buildSubGrid(grid_size,p_nstrike,p_ndip)
@@ -228,6 +288,68 @@ class planarfaultkinematic(planarfault):
                 
         # All done
         return
+    
+    # ----------------------------------------------------------------------
+    def setFaultMap(self,Nstrike,Ndip,leading='strike',check_depth=True):
+        '''
+        Set along dip and along strike indexing for patches
+
+        Args:
+            * Nstrike       : number of patches along strike
+            * Ndip          : number of patches along dip
+
+        Kwargs:
+            * leading       : leadinf index of self.patch (can be 'strike' or 'dip')
+            * check_depth   : CHeck patch depths and indexes are consistent
+
+        Returns:
+            * None
+        '''
+
+        # Check input parameters
+        if leading=='strike':
+            Nx=Nstrike
+            Ny=Ndip
+        else:
+            Nx=Ndip
+            Ny=Nstrike
+        assert Nx*Ny==len(self.patch), 'Incorrect Nstrike and Ndip'
+        
+        # Loop over patches
+        self.fault_map = []
+        self.fault_inv_map = np.zeros((Nstrike,Ndip),dtype='int')
+        for ny in range(Ny):
+            for nx in range(Nx):
+                p = ny * Nx + nx
+                if leading=='strike':
+                    self.fault_map.append([nx,ny])
+                    self.fault_inv_map[nx,ny] = p
+                elif leading=='dip':
+                    self.fault_map.append([ny,nx])
+                    self.fault_inv_map[ny,nx] = p
+        self.fault_map = np.array(self.fault_map)
+        
+        for n in range(Ndip):
+            i = np.where(self.fault_map[:,1]==n)[0]
+            assert len(i)==Nstrike, 'Mapping error'
+
+        for n in range(Nstrike):
+            i = np.where(self.fault_map[:,0]==n)[0]
+            assert len(i)==Ndip, 'Mapping error'
+
+        if check_depth:
+            for n in range(Ndip):
+                indexes = np.where(self.fault_map[:,1]==n)[0]
+                flag = True
+                for i in indexes:
+                    x,y,z = self.getcenter(self.patch[i])
+                    if flag:
+                        depth = np.round(z,1)
+                        flag  = False
+                    assert depth==np.round(z,1), 'Mapping error: inconsistent depth'
+
+        # All done
+        return
 
 
     def buildKinGFs(self, data, Mu, rake, slip=1., rise_time=2., stf_type='triangle', 
@@ -277,9 +399,12 @@ class planarfaultkinematic(planarfault):
             # Angles in degree
             p_strike_deg = p_strike * rad2deg
             p_dip_deg    = p_dip    * rad2deg
-
+            if isinstance (Mu,np.ndarray):
+                Mupatch = Mu[p]
+            else:
+                Mupatch = Mu
             # Seismic moment
-            M0 = Mu * slip * p_width * p_length * 1.0e13 # M0 assuming 1m slip
+            M0 = Mupatch * slip * p_width * p_length * 1.0e13 # M0 assuming 1m slip
             
             # Compute Green's functions using data waveform engine
             data.calcSynthetics('GF_tmp',p_strike_deg,p_dip_deg,rake,M0,rise_time,stf_type,rfile_name,
@@ -685,7 +810,7 @@ class planarfaultkinematic(planarfault):
                 for s in G[r][p]: # station name (string)
                     for c in G[r][p][s]: # component name (string)
                         o_file = os.path.join(o_dir,'gf_rake%d_patch%d_%s_%s.sac'%(r,p,s,c))
-                        G[r][p][s][c].wsac(o_file)
+                        G[r][p][s][c].write(o_file)
         
         # Write list of stations
         f = open(os.path.join(o_dir,'stat_list'),'w')
@@ -820,7 +945,7 @@ class planarfaultkinematic(planarfault):
         # All done
         return
     
-    def writeFaults2File(self, filename, slip=None, scale=1.0):
+    def writeFault2File(self, filename):
         '''
         Write the patch center coordinates in an ascii file with the format use 
         in RectangularPatchesKin
@@ -837,19 +962,14 @@ class planarfaultkinematic(planarfault):
             * None
         '''
 
-        # Check size
-        if self.N_slip!=None and self.N_slip!=len(self.patch):
-            raise NotImplementedError('Only works for len(slip)==len(patch)')
-
-
         # Write something
         print('Writing geometry to file {}'.format(filename))
 
         # Open the file
         fout = open(filename, 'w')
-        
+
         #Read Header
-        fout.write('#lon lat E[km] N[km] Dep[km] strike dip Area ID ')
+        fout.write('#lon lat E[km] N[km] Dep[km] strike dip Area ID \n')
         # Loop over the patches
         nPatches = len(self.patch)
         for patch in self.patch:
@@ -862,7 +982,7 @@ class planarfaultkinematic(planarfault):
             lonc, latc = self.xy2ll(xc, yc)
 
             # Write the string to file
-            fout.write('{} {} {} {} \n'.format(lonc, latc, zc, slp[pIndex]))
+            fout.write('{0:5.3f} {1:5.3f} {2:5.3f} {3:5.3f} {4:5.2f} {5:5.2f} {6:5.2f} {7:5.2f} {8:5.2f} \n'.format(lonc, latc,xc, yc, zc, np.rad2deg(self.f_strike),np.rad2deg(self.f_dip),self.area[pIndex],pIndex))
 
         # Close the file
         fout.close()
@@ -894,4 +1014,57 @@ class planarfaultkinematic(planarfault):
             # All done
             return
 
+    def castbigM(self,n_ramp_param,eik_solver,npt=4,Dtriangles=1.,grid_space=1.0):
+            '''
+            Cast kinematic model into bigM for forward modeling using bigG
+            (model should be specified in slip, tr and vr attributes, hypocenter 
+            must be specified)
+
+            Args:
+                * n_ramp_param  : number of nuisance parameters (e.g., InSAR orbits)
+                * eik_solver    : eikonal solver
+
+            Kwargs:
+                * npt**2        : numper of point sources per patch 
+                * Dtriangles    : ??
+                * grid_space    : ??
+
+            Returns:
+                * bigM matrix
+            '''
+
+            print('Casting model into bigM')        
+            
+            # Eikonal resolution
+            eik_solver.setGridFromFault(self,grid_space)
+            eik_solver.fastSweep()
+            
+            # BigG x BigM (on the fly time-domain convolution)
+            Np = len(self.patch)  
+            Ntriangles = int(self.bigG.shape[1]/(2*Np))
+            bigM = np.zeros((self.bigG.shape[1],))
+            for p in range(Np):
+                # Location at the patch center
+                p_x, p_y, p_z, p_width, p_length, p_strike, p_dip = self.getpatchgeometry(p,center=True)
+                dip_c, strike_c = self.getHypoToCenter(p,True)
+                # Grid location
+                grid_size_dip = p_length/npt
+                grid_size_strike = p_length/npt
+                grid_strike = strike_c+np.arange(0.5*grid_size_strike,p_length,grid_size_strike) - p_length/2.
+                grid_dip    = dip_c+np.arange(0.5*grid_size_dip   ,p_width ,grid_size_dip   )    - p_width/2.
+                time = np.arange(Ntriangles)*Dtriangles#+Dtriangles
+                T    = np.zeros(time.shape)
+                Tr2  = self.tr[p]/2.            
+                for i in range(npt):
+                    for j in range(npt):
+                        t = eik_solver.getT0([grid_dip[i]],[grid_strike[j]])[0]
+                        tc = t+Tr2
+                        ti = np.where(np.abs(time-tc)<Tr2)[0]            
+                        T[ti] += (1/Tr2 - np.abs(time[ti]-tc)/(Tr2*Tr2))*Dtriangles
+                for nt in range(Ntriangles):
+                    bigM[2*nt*Np+p]     = T[nt] * self.slip[p,0]/float(npt*npt)
+                    bigM[(2*nt+1)*Np+p] = T[nt] * self.slip[p,1]/float(npt*npt)
+
+            # All done 
+            return bigM  
 #EOF
