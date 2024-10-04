@@ -1013,6 +1013,31 @@ class planarfaultkinematic(planarfault):
             
             # All done
             return
+    
+    # ----------------------------------------------------------------------
+    def saveBigCd(self, bigCdfile = 'kinematicG.Cd', dtype='np.float64'):
+        '''
+        Save bigCd matrix
+
+        Kwargs:
+            * bigCdfile     : Output filename
+            * dtype         : binary type for output
+
+        Returns:    
+            * None
+        '''
+
+        # Check if Cd exists
+        assert self.bigCd is not None, 'bigCd must be assigned'
+        
+        # Convert Cd to dtype
+        Cd = self.bigCd.astype(dtype)
+
+        # Write t file
+        Cd.tofile(bigCdfile)
+
+        # All done
+        return
 
     def castbigM(self,n_ramp_param,eik_solver,npt=4,Dtriangles=1.,grid_space=1.0):
             '''
