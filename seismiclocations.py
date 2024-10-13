@@ -114,11 +114,13 @@ class seismiclocations(SourceInv):
             hr = int(tmp[3])
             mi = int(tmp[4])
             sd = int(np.floor(float(tmp[5])))
-            lat = float(tmp[7])
-            lon = float(tmp[6])
+            lat = float(tmp[6])
+            lon = float(tmp[7])
             depth = float(tmp[8])
-            mag = float(tmp[9])
-
+            if len(tmp) ==10:
+                mag = float(tmp[9])
+            else:
+                mag = -12345
             # Create the time object
             d = dt.datetime(yr, mo, da, hr, mi, sd)
 
