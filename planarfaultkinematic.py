@@ -982,7 +982,7 @@ class planarfaultkinematic(planarfault):
             lonc, latc = self.xy2ll(xc, yc)
 
             # Write the string to file
-            fout.write('{0:5.3f} {1:5.3f} {2:5.3f} {3:5.3f} {4:5.2f} {5:5.2f} {6:5.2f} {7:5.2f} {8:5.2f} \n'.format(lonc, latc,xc, yc, zc, np.rad2deg(self.f_strike),np.rad2deg(self.f_dip),self.area[pIndex],pIndex))
+            fout.write('{0:5.3f} {1:5.3f} {2:5.3f} {3:5.3f} {4:5.2f} {5:5.2f} {6:5.2f} {7:5.2f} {8:5d} \n'.format(lonc, latc,xc, yc, zc, np.rad2deg(self.f_strike),np.rad2deg(self.f_dip),self.area[pIndex],pIndex))
 
         # Close the file
         fout.close()
