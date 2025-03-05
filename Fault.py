@@ -721,7 +721,7 @@ class Fault(SourceInv):
         
         # Make the interpolator
         if recompute:
-            self.intcumdis = sciint.interp2d(x, y, self.cumdis, fill_value=0.) 
+            self.intcumdis = sciint.LinearNDInterpolator(np.vstack((x, y)).T, self.cumdis, fill_value=0.) 
         assert hasattr(self, 'intcumdis'), 'An interpolator is needed'
 
         # Make a function with this
@@ -1432,7 +1432,7 @@ class Fault(SourceInv):
                 print('---------------------------------')
             self.kernelsEDKS = 'kernels.edks'
         stratKernels = self.kernelsEDKS
-        assert os.path.isfile(stratKernels), 'Kernels for EDKS not found...'
+        assert os.path.isfile(stratKernels), 'Kernels for EDKS not found...: {}'.format(stratKernels)
 
         # Show me
         if verbose:
@@ -2439,7 +2439,7 @@ class Fault(SourceInv):
     # ----------------------------------------------------------------------
     def buildCm(self, sigma, lam, lam0=None, extra_params=None, lim=None,
                                   verbose=True):
-        '''
+        r'''
         Builds a model covariance matrix using the equation described in
         Radiguet et al 2010. We use
 
@@ -2526,7 +2526,7 @@ class Fault(SourceInv):
     # ----------------------------------------------------------------------
     def buildCmXY(self, sigma, lam, lam0=None, extra_params=None, lim=None,
                                   verbose=True):
-        '''
+        r'''
         Builds a model covariance matrix using the equation described in
         Radiguet et al 2010 with a different characteristic lengthscale along
         the horizontal and vertical directions. We use
@@ -2617,7 +2617,7 @@ class Fault(SourceInv):
     # ----------------------------------------------------------------------
     def buildCmSlipDirs(self, sigma, lam, lam0=None, extra_params=None,
                                           lim=None, verbose=True):
-        '''
+        r'''
         Builds a model covariance matrix using the equation described in
         Radiguet et al 2010. Here, Sigma and Lambda are lists specifying
         values for the slip directions. We use
@@ -2720,7 +2720,7 @@ class Fault(SourceInv):
     # ----------------------------------------------------------------------
     def buildCmSensitivity(self, sigma, lam, lam0=None, extra_params=None,
                                               lim=None, verbose=True):
-        '''
+        r'''
         Builds a model covariance matrix using the equation described in Radiguet et al 2010.
         We use
 

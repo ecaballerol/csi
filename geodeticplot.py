@@ -581,13 +581,13 @@ class geodeticplot(object):
             if seacolor is not None: 
                 self.carte.add_feature(cfeature.NaturalEarthFeature('physical', 
                                                                     'ocean', 
-                                                                    '10m',
+                                                                    scale=resolution,
                                                                     edgecolor=color, 
                                                                     facecolor=seacolor, 
                                                                     zorder=np.max([zorder-1,0])))
 
         # coastlines in cartopy are multipolygon objects. Polygon has exterior, which has xy
-        self.coastlines = cfeature.NaturalEarthFeature('physical', 'land', scale='10m',
+        self.coastlines = cfeature.NaturalEarthFeature('physical', 'land', scale=resolution,
                                                 edgecolor=color, 
                                                 facecolor=landcolor, 
                                                 linewidth=linewidth, 
@@ -626,14 +626,14 @@ class geodeticplot(object):
         # All done
         return
 
-    def drawCountries(self, scale='110m', linewidth=1., edgecolor='gray', facecolor='lightgray', alpha=1., zorder=0):
+    def drawCountries(self, resolution='10m', linewidth=1., edgecolor='gray', facecolor='lightgray', alpha=1., zorder=0):
         '''
         See the cartopy manual for options
         '''
 
         # Check
         if self.carte is not None:
-            self.countries = cfeature.NaturalEarthFeature(scale=scale, category='cultural', name='admin_0_countries', 
+            self.countries = cfeature.NaturalEarthFeature(scale=resolution, category='cultural', name='admin_0_countries', 
                                                           linewidth=linewidth, edgecolor=edgecolor, facecolor=facecolor,
                                                           alpha=alpha, zorder=zorder)
             self.carte.add_feature(self.countries)
@@ -799,6 +799,7 @@ class geodeticplot(object):
             for p, patch in zip(range(len(fault.patchll)), fault.patchll):
                 x = []
                 y = []
+                ncorners = len(fault.patchll[0])
                 for i in range(ncorners):
                     x.append(patch[i][0]+offset[0])
                     y.append(patch[i][1]+offset[1])
@@ -808,10 +809,12 @@ class geodeticplot(object):
                     verts.append((xi,yi))
                 rect = colls.PolyCollection([verts])
                 rect.set_facecolor(scalarMap.to_rgba(slip[p]))
-                rect.set_edgecolors('gray')
+                if edgecolor=='slip': 
+                    rect.set_edgecolors(scalarMap.to_rgba(slip[p]))
+                else:
+                    rect.set_edgecolors(edgecolor)
                 rect.set_linewidth(linewidth)
-                if alpha<1.0:
-                    rect.set_alpha(alpha)
+                if alpha<1.0: rect.set_alpha(alpha)
                 rect.set_zorder(zorder)
                 self.carte.add_collection(rect)
 
