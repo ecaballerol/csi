@@ -131,7 +131,7 @@ class seismic(SourceInv):
     
 
     def buildCdFromRes(self,fault,model,n_ramp_param=None,eik_solver=None,npt=4,nmesh=None,relative_error=0.2,
-                       add_to_previous_Cd=False,average_correlation=False,exp_cor=False,exp_cor_len=10.):
+                       add_to_previous_Cd=False,average_correlation=False,exp_cor=False,exp_cor_len=10.,Dtriangles=1.):
         '''
         Build Cd from residuals
 
@@ -166,7 +166,7 @@ class seismic(SourceInv):
 
         if type(model)==str: # Use an AlTar Kin
             print('Use model file: %s to compute residuals for Cd'%(model))
-            Dtriangles = 1. # HACK: We assume Dtriangles=1 !!!
+            Dtriangles = Dtriangles # HACK: We assume Dtriangles=1 !!!
             print('Warning: Dtriangle=1 is hardcoded in buildCdFromRes')
             
             Np = len(fault.patch)        
@@ -235,7 +235,7 @@ class seismic(SourceInv):
             cor = signal.correlate(R,R)
             cor /= cor.max()
         if exp_cor:
-            tcor = (np.arange(2*len(R)-1)-len(R)+1).astype('np.float64') 
+            tcor = (np.arange(2*len(R)-1)-len(R)+1).astype('float64') 
             plt.plot(tcor,cor)
             #cor = np.exp(-(tcor*tcor)/(gauss_cor_std*gauss_cor_std))
             cor = np.exp(-np.abs(tcor)/(exp_cor_len))

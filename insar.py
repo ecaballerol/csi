@@ -339,7 +339,7 @@ class insar(SourceInv):
         self.lat = []
         self.err = []
         self.los = []
-        self.corner = []
+        #self.corner = []
 
         # Loop over yje lines
         for i in range(header,len(Lines)):

@@ -1122,12 +1122,12 @@ class RectangularPatchesKin(RectangularPatches):
         
         # Load bigG and/or bigD files and convert them to double precision
         if bigDfile != None:
-            self.bigD = np.fromfile(bigDfile, dtype=dtype).astype('np.float64')
+            self.bigD = np.fromfile(bigDfile, dtype=dtype).astype('float64')
 
         if bigGfile is not None:
             assert self.bigD is not None
             Nd = self.bigD.size
-            self.bigG = np.fromfile(bigGfile, dtype=dtype).astype('np.float64')
+            self.bigG = np.fromfile(bigGfile, dtype=dtype).astype('float64')
             assert self.bigG.size%Nd == 0
             Nm = int(self.bigG.size/Nd)
             # Reshape bigG matrix
@@ -1201,7 +1201,7 @@ class RectangularPatchesKin(RectangularPatches):
 
         # Import sacpy 
         import sacpy
-        i_sac = sacpy.sac()
+        i_sac = sacpy.Sac()
         
         # Check the patch attribute
         assert self.patch != None, 'Patch object should be assigned'

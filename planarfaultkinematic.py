@@ -846,7 +846,7 @@ class planarfaultkinematic(planarfault):
         # Read list of station names
         if station_file != None:
             sta_name = []
-            f = open(os.path.join(o_dir,'stat_list'),'r')
+            f = open(os.path.join(i_dir,'stat_list'),'r')
             for l in f:
                 sta_name.append(l.strip().split()[0])
             f.close()
@@ -923,7 +923,7 @@ class planarfaultkinematic(planarfault):
         # Check list of station names
         if station_file != None:
             sta_name = []
-            f = open(os.path.join(o_dir,'stat_list'),'r')
+            f = open(os.path.join(i_dir,'stat_list'),'r')
             for l in f:
                 sta_name.append(l.strip().split()[0])
             f.close()
