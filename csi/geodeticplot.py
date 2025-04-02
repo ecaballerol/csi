@@ -690,7 +690,7 @@ class geodeticplot(object):
     def faultpatches(self, fault, slip='strikeslip', norm=None, colorbar=True,
                      cbaxis=[0.1, 0.2, 0.1, 0.02], cborientation='horizontal', cblabel='',
                      plot_on_2d=False, revmap=False, linewidth=1.0, cmap='jet', offset=None,
-                     alpha=1.0, factor=1.0, zorder=3, edgecolor='slip', colorscale='normal'):
+                     alpha=1.0, factor=1.0, zorder=3, edgecolor='slip', colorscale='normal',stdfault=None):
         '''
         Plot the fualt patches
 
@@ -712,22 +712,29 @@ class geodeticplot(object):
             * zorder        : matplotlib order of plotting
             * edgecolor     : either a color or 'slip'
             * colorscale    : 'normal' or 'log'
-
+            * alpha         : constant transparency value
+            * stdfault      : to plot slip with transparency varying as a function of the std/mean relation for each patch. To use with positive values of slip and colorbars that are lighter near zero.
         Returns:
             * None
         '''
 
-        # Get slip
+# Get slip
         if slip in ('strikeslip'):
             slip = fault.slip[:,0].copy()
+            if stdfault!=None:
+                stdslip = stdfault.slip[:,0].copy()
         elif slip in ('dipslip'):
             slip = fault.slip[:,1].copy()
+            if stdfault!=None:
+                stdslip = stdfault.slip[:,1].copy()
         elif slip in ('tensile'):
             slip = fault.slip[:,2].copy()
+            if stdfault!=None:
+                stdslip = stdfault.slip[:,2].copy()
         elif slip in ('total'):
             slip = np.sqrt(fault.slip[:,0]**2 + fault.slip[:,1]**2 + fault.slip[:,2]**2)
-        elif slip in ('coupling'):
-            slip = fault.coupling.copy()
+            if stdfault!=None:
+                stdslip = np.sqrt(stdfault.slip[:,0]**2 + stdfault.slip[:,1]**2 + stdfault.slip[:,2]**2)
         else:
             print ("Unknown slip direction")
             return
@@ -787,6 +794,9 @@ class geodeticplot(object):
                     rect.set_edgecolors(edgecolor)
                 if alpha<1.0:
                     rect.set_alpha(alpha)
+                if (stdfault!=None):
+                    if (stdslip[p]>0) and (slip[p]!=0):
+                        rect.set_alpha(np.min([1.,np.max([slip[p],0.])/stdslip[p]]))
                 rect.set_linewidth(linewidth)
                 self.faille.add_collection3d(rect)
 
@@ -814,7 +824,11 @@ class geodeticplot(object):
                 else:
                     rect.set_edgecolors(edgecolor)
                 rect.set_linewidth(linewidth)
-                if alpha<1.0: rect.set_alpha(alpha)
+                if stdfault!=None:
+                    if (stdslip[p]>0) and (slip[p]!=0):
+                        rect.set_alpha(np.min([1.,np.max([slip[p],0.])/stdslip[p]]))
+                if alpha<1.0:
+                    rect.set_alpha(alpha)
                 rect.set_zorder(zorder)
                 self.carte.add_collection(rect)
 
@@ -887,10 +901,10 @@ class geodeticplot(object):
         #plot 3-d spheroid here
 
         #Radii -- assuming prolate spheroid (z-axis is the semi-major axis when dip = 90, y-axis is semi-major axis when strike = 0), in km
-        rx, ry, rz = fault.ellipshape['a']*fault.ellipshape['A']/1000.,fault.ellipshape['a']/1000.,fault.ellipshape['a']*fault.ellipshape['A']/1000.
+        rx, ry, rz = fault.ellipshape['ax']/1000.,fault.ellipshape['ay']/1000.,fault.ellipshape['az']/1000.
         #All spherical angles
         u = np.linspace(0, 2 * np.pi, 100)
-        v = np.linspace(0, np.pi, 100        )
+        v = np.linspace(0, np.pi, 100)
 
         #xyz coordinates for spherical angles
         ex = rx * np.outer(np.cos(u), np.sin(v))
@@ -917,7 +931,6 @@ class geodeticplot(object):
             #x0 and y0 are in lat/lon, depth is negative and in km
             self.faille.plot_surface(ex_ll,ey_ll,ez_ll,color=scalarMap.to_rgba(delta))
 
-
             # Reset x- and y-lims
             self.faille.set_xlim([self.lonmin,self.lonmax])
             self.faille.set_ylim([self.latmin,self.latmax])
@@ -928,9 +941,9 @@ class geodeticplot(object):
 
         # put up a colorbar
         if colorbar:
-            if self.faille is not None: self.addColorbar(delta, scalaMap, cbaxis, cborientation, self.figFaille, cblabel=cblabel)
+            if self.faille is not None: self.addColorbar(delta, scalarMap, cbaxis, cborientation, self.figFaille, cblabel=cblabel)
             if plot_on_2d and self.carte is not None:
-                self.addColorbar(delta, scalaMap, cbaxis, cborientation, self.figCarte, cblabel=cblabel)
+                self.addColorbar(delta, scalarMap, cbaxis, cborientation, self.figCarte, cblabel=cblabel)
 
         # All done
         return
@@ -1654,8 +1667,12 @@ class geodeticplot(object):
             assert insar.err is not None, 'No Error to plot'
             d = insar.err
         else:
-            print('Unknown data type')
-            return
+            if hasattr(insar, data):
+                assert len(getattr(insar, data)) == len(insar.vel), f'Attribute {data} has incorrect length ({len(getattr(insar, data))} instead of {len(insar.vel)}'
+                d = getattr(insar, data)
+            else:
+                print('Unknown data type')
+                return
 
         # Prepare the colorlimits
         if norm == None:
