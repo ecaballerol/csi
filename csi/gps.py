@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import os
 import copy
 import sys
-
+from os.path import join
 import shapely.geometry as geom
 
 # Personals
@@ -3322,7 +3322,7 @@ class gps(SourceInv):
         return
 
     def initializeTimeSeries(self, start=None, end=None, stationfile=False,
-                                   sqlfile=None, time=None,  
+                                   sqlfile=None, path2stat='./', time=None,  
                                    interval=1, verbose=False, los=False, 
                                    factor=1.):
         '''
@@ -3334,6 +3334,7 @@ class gps(SourceInv):
             * interval      : in days (default=1).
             * stationfile   : Read the time series from the station file
             * sqlfile       : Red the time series from a sqlfile
+            * path2stat     : Path to the station files
             * time          : time would be taken from this array
             * verbose       : talk to me
             * los           : Los vector
@@ -3362,7 +3363,7 @@ class gps(SourceInv):
             elif sqlfile is not None:
                 self.timeseries[station].read_from_sql(sqlfile, factor=factor)
             elif stationfile:
-                filename = '{}.dat'.format(station)
+                filename = join(path2stat, '{}.dat'.format(station))
                 self.timeseries[station].read_from_file(filename, verbose=verbose)
 
         # Save
