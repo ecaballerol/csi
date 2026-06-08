@@ -3605,8 +3605,81 @@ class gps(SourceInv):
 
         # All done
         return
+    
+    def addOffsetToTimeSeries(self, offsetfile, offsetdate, scale=1., verbose=False):
+        '''
+        Adds a static offset to the time series of each station after a given date.
+        The offset is read from a file with one line per station.
 
-    def simulateTimeSeriesFromCMTWithRandomPerturbation(self, sismo, N, xstd=10., ystd=10., depthstd=10., Moperc=30., scale=1., verbose=True, plot='jhasgc', elasticstructure='okada', relative_location_is_ok=False):
+        Args:
+            * offsetfile    : Path to the offset file. Format per line:
+                            stationname  east_offset  north_offset  up_offset
+            * offsetdate    : datetime object. Offset is added to all epochs >= this date.
+            *scale           : scaling factor for the offsets (default is 1.).
+
+        Kwargs:
+            * verbose       : talk to me
+
+        Returns:
+            * None
+        '''
+        # Read the offset file into a dict: {station: (de, dn, du)}
+        offsets = {}
+        with open(offsetfile, 'r') as f:
+            for line in f.readlines():
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                values = line.split()
+                station = values[0]
+                de = float(values[1]) * scale
+                dn = float(values[2]) * scale
+                du = float(values[3]) * scale
+                offsets[station] = (de, dn, du)
+
+        # Loop over stations
+        for station in self.station:
+
+            if station not in offsets:
+                if verbose:
+                    print('No offset found for station {}, skipping.'.format(station))
+                continue
+
+            if station not in self.timeseries:
+                if verbose:
+                    print('No time series found for station {}, skipping.'.format(station))
+                continue
+
+            de, dn, du = offsets[station]
+            ts = self.timeseries[station]
+
+            # Build a Heaviside-like step function
+            TStime = np.array(ts.time)
+            TSlength = len(TStime)
+            step = np.zeros(TSlength)
+            step[TStime >= offsetdate] = 1.0
+
+            if verbose:
+                print('Station {}: adding offset E={}, N={}, U={} to {} epochs'.format(
+                    station, de, dn, du, int(step.sum())))
+
+            # Apply offset
+            ts.east.value  += de * step
+            ts.north.value += dn * step
+            ts.up.value    += du * step
+
+            # Optionally propagate to synth if it exists
+            if ts.east.synth is not None:
+                ts.east.synth += de * step
+            if ts.north.synth is not None:
+                ts.north.synth += dn * step
+            if ts.up.synth is not None:
+                ts.up.synth += du * step
+
+        # All done
+        return
+
+    def simulateTimeSeriesFromCMTWithRandomPerturbation(self, sismo, N, xstd=10., ystd=10., depthstd=10., Moperc=30., scale=1., verbose=True, plot='jhasgc', elasticstructure='okada', relative_location_is_ok=False, offsetfile=None, offsetdate=None, scaleoffset=1.):
         '''
         Runs N simulations of time series from CMT.
         xtsd, ystd, depthstd are the standard deviation of the Gaussian used to perturbe the location
@@ -3627,6 +3700,10 @@ class gps(SourceInv):
             * plot      : name of the station to plot
             * elasticstructure  : okada or edks
             * relative_location_is_ok : a common perturbation for all mechanisms
+            * offsetfile    : Path to the offset file. Format per line:
+                            stationname  east_offset  north_offset  up_offset
+            * offsetdate    : datetime object. Offset is added to all epochs >= this date.
+            * scaleoffset    : scaling factor for the offsets (default is 1.).
 
         Returns:
             * None
@@ -3680,6 +3757,9 @@ class gps(SourceInv):
                                            scale=scale, 
                                            elasticstructure=elasticstructure, 
                                            verbose=False)
+            # Apply offset if provided
+            if offsetfile is not None:
+                self.addOffsetToTimeSeries(offsetfile, offsetdate, scale=scaleoffset, verbose=False)
 
             # Take these simulation and copy them
             for station in self.station:
