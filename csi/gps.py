@@ -3398,7 +3398,7 @@ class gps(SourceInv):
             timeseries = self.timeseries[station]
 
             # Create a filename
-            filename = '{}.dat'.format(station)
+            filename = join(outdir, '{}.dat'.format(station))
 
             # Write 2 file
             timeseries.write2file(filename, steplike=steplike)
@@ -3678,6 +3678,175 @@ class gps(SourceInv):
 
         # All done
         return
+    
+    def combineNetworksTimeSeries(self, gpsdata, newNetworkName='Combined Network', operation='sum'):
+        '''
+        Combine the time series of multiple networks into a new network.
+        Uses the UNION of all time axes: dates present in only one network
+        keep their original values; dates present in multiple networks are
+        combined according to the operation.
+
+        Args:
+            * gpsdata           : List of gps instances (each must have .timeseries initialized).
+
+        Kwargs:
+            * newNetworkName    : Name of the returned network.
+            * operation         : 'sum' or 'subtract'. If 'subtract', subtracts the second
+                                network's time series from the first (self).
+
+        Returns:
+            * gp_out            : New gps instance with combined time series.
+        '''
+        import copy
+
+        # --- 1. Build the full list of networks (self + the ones passed as argument) ---
+        all_gps = [self] + gpsdata
+
+        # --- 2. Build the unique sorted station list across all networks ---
+        all_station_names = []
+        for gp in all_gps:
+            names_in_this_network = list(gp.timeseries.keys())
+            all_station_names += names_in_this_network
+        stations = np.unique(all_station_names).tolist()
+
+        # --- 3. Create the new network and copy station coordinates ---
+        gp_out = gps(newNetworkName,
+                    utmzone=self.utmzone,
+                    verbose=self.verbose,
+                    lon0=self.lon0,
+                    lat0=self.lat0)
+
+        Names, Lons, Lats = [], [], []
+        for station in stations:
+            for gp in all_gps:
+                if station in gp.station:
+                    idx = np.flatnonzero(gp.station == station)[0]
+                    Names.append(station)
+                    Lons.append(gp.lon[idx])
+                    Lats.append(gp.lat[idx])
+                    break
+        gp_out.setStat(np.array(Names), np.array(Lons), np.array(Lats))
+
+        # --- 4. Combine time series station by station ---
+        gp_out.timeseries = {}
+
+        for station in stations:
+
+            # Collect the gpstimeseries objects for this station across all networks
+            ts_list = [gp.timeseries[station]
+                    for gp in all_gps
+                    if station in gp.timeseries]
+
+            if len(ts_list) == 0:
+                continue
+
+            if len(ts_list) == 1:
+                # Station only in one network — just copy it
+                gp_out.timeseries[station] = copy.deepcopy(ts_list[0])
+                continue
+
+            # --- 5. Build the UNION of all time axes for this station ---
+            all_times = []
+            for ts in ts_list:
+                all_times += list(ts.time)
+            union_times = np.array(sorted(set(all_times)))
+
+            # --- 6. Create the output timeseries and set its time axis ---
+            ts_out = copy.deepcopy(ts_list[0])
+            ts_out.time = union_times.tolist()
+
+            # --- 7. Combine ENU components ---
+            # Each component is a timeseries object with .value and .error
+            components = ['east', 'north', 'up']
+
+            for comp in components:
+
+                # Skip if this component is not present
+                if not hasattr(ts_list[0], comp):
+                    continue
+
+                combined_vals = np.zeros(len(union_times))
+                combined_errs = np.zeros(len(union_times))
+
+                for ts in ts_list:
+                    if not hasattr(ts, comp):
+                        continue
+
+                    comp_ts = getattr(ts, comp)   # this is a timeseries object
+
+                    for i, t in enumerate(union_times):
+                        idx = np.flatnonzero(np.array(ts.time) == t)
+                        if len(idx) > 0:
+                            # This network has data at this date
+                            val = comp_ts.value[idx[0]]
+                            err = comp_ts.error[idx[0]] if hasattr(comp_ts, 'error') and comp_ts.error is not None else 0.0
+
+                            if operation in ('sum', 'Sum', 'SUM'):
+                                combined_vals[i] += val
+                            elif operation in ('subtract', 'Subtract', 'SUBTRACT', 'sub', 'Sub'):
+                                # ts_list[0] is always self (the network you called the method on)
+                                # ts_list[1], ts_list[2], ... are the networks passed in gpsdata
+                                if ts is ts_list[0]:
+                                    # This is the FIRST network (self) — we ADD its values
+                                    combined_vals[i] += val
+                                else:
+                                    # This is a SUBSEQUENT network — we SUBTRACT its values
+                                    combined_vals[i] -= val
+                            else:
+                                raise NotImplementedError(
+                                    f"operation='{operation}' is not implemented. "
+                                    "Use 'sum' or 'subtract'."
+                                )
+
+                            # Errors always combine in quadrature
+                            combined_errs[i] = np.sqrt(combined_errs[i]**2 + err**2)
+                        # If this network has no data at this date, contribute 0
+
+                # Write back into the component timeseries object
+                comp_out = getattr(ts_out, comp)
+                comp_out.time  = union_times.tolist()
+                comp_out.value = combined_vals
+                comp_out.error = combined_errs
+
+            # --- 8. Handle LOS timeseries if present ---
+            if hasattr(ts_list[0], 'los') and ts_list[0].los is not None:
+
+                los_list = [ts.los for ts in ts_list
+                            if hasattr(ts, 'los') and ts.los is not None]
+
+                if len(los_list) > 1:
+                    los_out = copy.deepcopy(los_list[0])
+                    los_out.time = union_times.tolist()
+
+                    combined_los_vals = np.zeros(len(union_times))
+                    combined_los_errs = np.zeros(len(union_times))
+
+                    for los in los_list:
+                        for i, t in enumerate(union_times):
+                            idx = np.flatnonzero(np.array(los.time) == t)
+                            if len(idx) > 0:
+                                val = los.value[idx[0]]
+                                err = los.error[idx[0]] if hasattr(los, 'error') and los.error is not None else 0.0
+
+                                if operation in ('sum', 'Sum', 'SUM'):
+                                    combined_los_vals[i] += val
+                                else:
+                                    combined_los_vals[i] += val if los is los_list[0] else -val
+
+                                combined_los_errs[i] = np.sqrt(combined_los_errs[i]**2 + err**2)
+
+                    los_out.value = combined_los_vals
+                    los_out.error = combined_los_errs
+                    ts_out.los    = los_out
+
+            gp_out.timeseries[station] = ts_out
+
+        # --- 9. Rebuild the global time vector of the new network ---
+        gp_out.time = np.unique(np.hstack([
+            list(gp_out.timeseries[s].time) for s in gp_out.timeseries
+        ])).tolist()
+
+        return gp_out
 
     def simulateTimeSeriesFromCMTWithRandomPerturbation(self, sismo, N, xstd=10., ystd=10., depthstd=10., Moperc=30., scale=1., verbose=True, plot='jhasgc', elasticstructure='okada', relative_location_is_ok=False, offsetfile=None, offsetdate=None, scaleoffset=1.):
         '''
