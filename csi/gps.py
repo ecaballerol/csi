@@ -4007,9 +4007,9 @@ class gps(SourceInv):
                 timeseries.north.value += nts.north.value
                 timeseries.up.value += nts.up.value
             # Mean
-            timeseries.east.value /= float(N)
-            timeseries.north.value /= float(N)
-            timeseries.up.value /= float(N)
+            timeseries.east.value /= float(N-1)
+            timeseries.north.value /= float(N-1)
+            timeseries.up.value /= float(N-1)
 
             # Loop over the samples to get the std
             for n in range(N):
