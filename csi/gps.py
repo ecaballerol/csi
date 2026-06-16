@@ -4007,9 +4007,9 @@ class gps(SourceInv):
                 timeseries.north.value += nts.north.value
                 timeseries.up.value += nts.up.value
             # Mean
-            timeseries.east.value /= float(N-1)
-            timeseries.north.value /= float(N-1)
-            timeseries.up.value /= float(N-1)
+            timeseries.east.value /= float(N)
+            timeseries.north.value /= float(N)
+            timeseries.up.value /= float(N)
 
             # Loop over the samples to get the std
             for n in range(N):
@@ -4022,9 +4022,9 @@ class gps(SourceInv):
                 timeseries.up.error += (nts.up.value - \
                                         timeseries.up.value)**2
             # Samples
-            timeseries.east.error /= float(N)
-            timeseries.north.error /= float(N)
-            timeseries.up.error /= float(N)
+            timeseries.east.error /= float(N-1)
+            timeseries.north.error /= float(N-1)
+            timeseries.up.error /= float(N-1)
 
             # Std
             timeseries.east.error = np.sqrt(timeseries.east.error)
