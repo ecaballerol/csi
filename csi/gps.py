@@ -3913,6 +3913,13 @@ class gps(SourceInv):
         if verbose:
             print ('Running {} perturbed earthquakes to derive the Synthetic GPS Time Series'.format(N))
 
+        if offsetfile is not None:
+            if not isinstance(offsetfile, (list, tuple)):
+                offsetfile = [offsetfile]
+                offsetdate = [offsetdate]
+                scaleoffset = [scaleoffset]
+            assert len(offsetfile) == len(offsetdate) == len(scaleoffset), \
+                "offsetfile, offsetdate, and scaleoffset must have the same length"
         # Loop and Generate new time series
         # the time series are going to be stored in 'station name id'
         # Example: 'atjn 0001', 'atjn 0002', atjn 0003', etc and the mean will be 'atjn'
@@ -3959,13 +3966,7 @@ class gps(SourceInv):
                                            elasticstructure=elasticstructure, 
                                            verbose=False)
             
-            if offsetfile is not None:
-                if not isinstance(offsetfile, (list, tuple)):
-                    offsetfile = [offsetfile]
-                    offsetdate = [offsetdate]
-                    scaleoffset = [scaleoffset]
-                assert len(offsetfile) == len(offsetdate) == len(scaleoffset), \
-                    "offsetfile, offsetdate, and scaleoffset must have the same length"
+            
             # Apply offset if provided
             if offsetfile is not None:
                 for ofile, odate, oscale in zip(offsetfile, offsetdate, scaleoffset):
