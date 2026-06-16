@@ -3746,6 +3746,7 @@ class gps(SourceInv):
                 continue
 
             # --- 5. Build the UNION of all time axes for this station ---
+            # We use ts.time (top-level) to determine what dates exist per station
             all_times = []
             for ts in ts_list:
                 all_times += list(ts.time)
@@ -3756,12 +3757,13 @@ class gps(SourceInv):
             ts_out.time = union_times.tolist()
 
             # --- 7. Combine ENU components ---
-            # Each component is a timeseries object with .value and .error
+            # Each component (east, north, up) is itself a timeseries object
+            # with its own .time, .value and .error attributes
             components = ['east', 'north', 'up']
 
             for comp in components:
 
-                # Skip if this component is not present
+                # Skip if this component is not present in the first network
                 if not hasattr(ts_list[0], comp):
                     continue
 
@@ -3772,38 +3774,47 @@ class gps(SourceInv):
                     if not hasattr(ts, comp):
                         continue
 
-                    comp_ts = getattr(ts, comp)   # this is a timeseries object
+                    # Get the component timeseries object (e.g. ts.east)
+                    comp_ts = getattr(ts, comp)
 
-                    for i, t in enumerate(union_times):
-                        idx = np.flatnonzero(np.array(ts.time) == t)
-                        if len(idx) > 0:
-                            # This network has data at this date
-                            val = comp_ts.value[idx[0]]
-                            err = comp_ts.error[idx[0]] if hasattr(comp_ts, 'error') and comp_ts.error is not None else 0.0
+                    # Build a dictionary: date -> index, once per component per network.
+                    # This avoids scanning the whole array for every date (much faster).
+                    # We use comp_ts.time (component-level) NOT ts.time (top-level)
+                    # because they can differ after processing.
+                    time_to_idx = {t: i_comp for i_comp, t in enumerate(comp_ts.time)}
+
+                    for i_union, t in enumerate(union_times):
+                        if t in time_to_idx:
+                            # This network HAS data at date t
+                            # i_comp is the position in the component's own time axis
+                            i_comp = time_to_idx[t]
+                            val = comp_ts.value[i_comp]
+                            if hasattr(comp_ts, 'error') and comp_ts.error is not None:
+                                err = comp_ts.error[i_comp]
+                            else:
+                                err = 0.0
 
                             if operation in ('sum', 'Sum', 'SUM'):
-                                combined_vals[i] += val
+                                combined_vals[i_union] += val
                             elif operation in ('subtract', 'Subtract', 'SUBTRACT', 'sub', 'Sub'):
-                                # ts_list[0] is always self (the network you called the method on)
-                                # ts_list[1], ts_list[2], ... are the networks passed in gpsdata
+                                # ts_list[0] is always self — we ADD its values
+                                # ts_list[1], [2], ... are gpsdata — we SUBTRACT their values
                                 if ts is ts_list[0]:
-                                    # This is the FIRST network (self) — we ADD its values
-                                    combined_vals[i] += val
+                                    combined_vals[i_union] += val
                                 else:
-                                    # This is a SUBSEQUENT network — we SUBTRACT its values
-                                    combined_vals[i] -= val
+                                    combined_vals[i_union] -= val
                             else:
                                 raise NotImplementedError(
                                     f"operation='{operation}' is not implemented. "
                                     "Use 'sum' or 'subtract'."
                                 )
 
-                            # Errors always combine in quadrature
-                            combined_errs[i] = np.sqrt(combined_errs[i]**2 + err**2)
-                        # If this network has no data at this date, contribute 0
+                            # Errors always combine in quadrature regardless of operation
+                            combined_errs[i_union] = np.sqrt(combined_errs[i_union]**2 + err**2)
+                        # If this network has no data at date t, it contributes 0
 
-                # Write back into the component timeseries object
-                comp_out = getattr(ts_out, comp)
+                # Write the combined result back into the component timeseries object
+                comp_out       = getattr(ts_out, comp)
                 comp_out.time  = union_times.tolist()
                 comp_out.value = combined_vals
                 comp_out.error = combined_errs
@@ -3815,25 +3826,47 @@ class gps(SourceInv):
                             if hasattr(ts, 'los') and ts.los is not None]
 
                 if len(los_list) > 1:
-                    los_out = copy.deepcopy(los_list[0])
+                    los_out      = copy.deepcopy(los_list[0])
                     los_out.time = union_times.tolist()
 
                     combined_los_vals = np.zeros(len(union_times))
                     combined_los_errs = np.zeros(len(union_times))
 
                     for los in los_list:
-                        for i, t in enumerate(union_times):
-                            idx = np.flatnonzero(np.array(los.time) == t)
-                            if len(idx) > 0:
-                                val = los.value[idx[0]]
-                                err = los.error[idx[0]] if hasattr(los, 'error') and los.error is not None else 0.0
+
+                        # Build a dictionary: date -> index, once per LOS per network
+                        # We use los.time (LOS-level) for the same reason as comp_ts.time
+                        time_to_idx_los = {t: i_los for i_los, t in enumerate(los.time)}
+
+                        for i_union, t in enumerate(union_times):
+                            if t in time_to_idx_los:
+                                # This network HAS LOS data at date t
+                                # i_los is the position in the LOS own time axis
+                                i_los = time_to_idx_los[t]
+                                val = los.value[i_los]
+                                if hasattr(los, 'error') and los.error is not None:
+                                    err = los.error[i_los]
+                                else:
+                                    err = 0.0
 
                                 if operation in ('sum', 'Sum', 'SUM'):
-                                    combined_los_vals[i] += val
+                                    combined_los_vals[i_union] += val
+                                elif operation in ('subtract', 'Subtract', 'SUBTRACT', 'sub', 'Sub'):
+                                    # los_list[0] is always self — we ADD its values
+                                    # los_list[1], [2], ... are gpsdata — we SUBTRACT their values
+                                    if los is los_list[0]:
+                                        combined_los_vals[i_union] += val
+                                    else:
+                                        combined_los_vals[i_union] -= val
                                 else:
-                                    combined_los_vals[i] += val if los is los_list[0] else -val
+                                    raise NotImplementedError(
+                                        f"operation='{operation}' is not implemented. "
+                                        "Use 'sum' or 'subtract'."
+                                    )
 
-                                combined_los_errs[i] = np.sqrt(combined_los_errs[i]**2 + err**2)
+                                # Errors always combine in quadrature regardless of operation
+                                combined_los_errs[i_union] = np.sqrt(combined_los_errs[i_union]**2 + err**2)
+                            # If this network has no LOS data at date t, it contributes 0
 
                     los_out.value = combined_los_vals
                     los_out.error = combined_los_errs
@@ -3869,10 +3902,9 @@ class gps(SourceInv):
             * plot      : name of the station to plot
             * elasticstructure  : okada or edks
             * relative_location_is_ok : a common perturbation for all mechanisms
-            * offsetfile    : Path to the offset file. Format per line:
-                            stationname  east_offset  north_offset  up_offset
-            * offsetdate    : datetime object. Offset is added to all epochs >= this date.
-            * scaleoffset    : scaling factor for the offsets (default is 1.).
+            * offsetfile    : Path to offset file, or list of paths for multiple offsets.
+            * offsetdate    : datetime object, or list of datetime objects (one per offset file).
+            * scaleoffset   : scaling factor or list of scaling factors (default is 1.).    
 
         Returns:
             * None
@@ -3926,9 +3958,18 @@ class gps(SourceInv):
                                            scale=scale, 
                                            elasticstructure=elasticstructure, 
                                            verbose=False)
+            
+            if offsetfile is not None:
+                if not isinstance(offsetfile, (list, tuple)):
+                    offsetfile = [offsetfile]
+                    offsetdate = [offsetdate]
+                    scaleoffset = [scaleoffset]
+                assert len(offsetfile) == len(offsetdate) == len(scaleoffset), \
+                    "offsetfile, offsetdate, and scaleoffset must have the same length"
             # Apply offset if provided
             if offsetfile is not None:
-                self.addOffsetToTimeSeries(offsetfile, offsetdate, scale=scaleoffset, verbose=False)
+                for ofile, odate, oscale in zip(offsetfile, offsetdate, scaleoffset):
+                    self.addOffsetToTimeSeries(ofile, odate, scale=oscale, verbose=False)
 
             # Take these simulation and copy them
             for station in self.station:
