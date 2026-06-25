@@ -682,7 +682,7 @@ class gpstimeseries(SourceInv):
             if hasattr(self, 'los'):
                 lo = self.los.value[i]
             else:
-                lo = None
+                lo = ''
             fout.write('{} {} {} {} {} {} {} {} \n'.format(t, e, n, u, es, ns, us, lo))
             if steplike:
                 e = self.east.value[i+1]
@@ -705,7 +705,7 @@ class gpstimeseries(SourceInv):
             if hasattr(self, 'los'):
                 lo = self.los.value[i]
             else:
-                lo = None
+                lo = ''
             fout.write('{} {} {} {} {} {} {} {} \n'.format(t, e, n, u, es, ns, us, lo))
 
         # Done 

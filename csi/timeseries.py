@@ -617,7 +617,7 @@ class timeseries(SourceInv):
         # All done
         return indexes
 
-    def plot(self, figure=1, styles=['.r'], show=True, data='data', subplot=None):
+    def plot(self, figure=1, styles=['.r'], show=True, data='data', subplot=None,plot_kwargs=None):
         '''
         Plots the time series.
 
@@ -627,6 +627,7 @@ class timeseries(SourceInv):
             * show    :   Show to me (default=True)
             * data    :   can be 'data', 'derivative', 'synth' or a list of those
             * subplot :   axes instance to be used for plotting. If None, creates a new one
+            * plot_kwargs :   kwargs dict for adding more plotting options
 
         Returns:
             * None
@@ -663,11 +664,13 @@ class timeseries(SourceInv):
             ax = subplot
         else:
             ax = fig.add_subplot(111)
+        if plot_kwargs is None:
+            plot_kwargs = {}
 
         # Plot ts
         for v,style in zip(values, styles):
             u = np.argsort(self.time)
-            ax.plot(np.array(self.time)[u], np.array(v)[u], style)
+            ax.plot(np.array(self.time)[u], np.array(v)[u], style,**plot_kwargs)
 
         # show
         if show:
