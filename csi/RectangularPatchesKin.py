@@ -1077,6 +1077,59 @@ class RectangularPatchesKin(RectangularPatches):
         return tmin
     # ----------------------------------------------------------------------
             
+    def buildKinLaplacian(self, lam_s=1e9, lam_t=1e9, numz=None, Ntr=1):
+        '''
+        Function to compute iCm for kinematic rectangular fault.
+        Combines spatial (Laplacian) and temporal (first difference) regularization.
+        * lam_s  : Spatial weighting
+        * lam_t  : Temporal weighting  
+        * numz   : Number of patches along dip
+        * Ntr    : Number of time windows
+        '''
+        assert numz is not None, 'Need to set dip fault number'
+        self.numz = numz
+        Np = len(self.patch)
+        total_params = 2 * Np * Ntr
+
+        # ---- Spatial regularization ----
+        self.computeAdjacencyMat(patchinc='dip')
+        Dlap = self.buildLaplacian()
+        assert np.allclose(Dlap.sum(axis=1), 0.0), "Laplacian row sums not zero!"
+        Dlap2 = np.dot(Dlap.T, Dlap)
+        eigvals_sorted = np.sort(np.linalg.eigvalsh(Dlap2))
+        nugget = eigvals_sorted[1] * 1e-6
+        local_iCm = lam_s * (Dlap2 + nugget * np.eye(Dlap2.shape[0]))
+
+        # Altar indexing: [strike_w1(Np), dip_w1(Np), strike_w2(Np), dip_w2(Np),...]
+        iCm_spatial = np.zeros((total_params, total_params))
+        for nt in range(Ntr):
+            i_strike = nt * 2 * Np
+            i_dip    = i_strike + Np
+            iCm_spatial[i_strike:i_strike+Np, i_strike:i_strike+Np] = local_iCm
+            iCm_spatial[i_dip:i_dip+Np,       i_dip:i_dip+Np]       = local_iCm
+
+        # ---- Temporal regularization ----
+        if Ntr > 1:
+            Lt = np.eye(total_params)
+            iforward=np.arange(Np*2*(Ntr-1))
+            Lt[iforward,iforward+(2*Np)]=-1
+        else:
+            Lt = np.zeros((total_params, total_params))
+
+        LtLt = np.dot(Lt.T, Lt)
+        iCm_temporal = lam_t * LtLt
+
+        # ---- Combine ----
+        iCm_total = iCm_spatial + iCm_temporal
+        assert np.allclose(iCm_total, iCm_total.T, atol=1e-10), "iCm not symmetric!"
+        Cm_total = np.linalg.inv(iCm_total)
+
+        self.Cm  = Cm_total
+        self.iCm = iCm_total
+        return Cm_total, iCm_total
+
+    # ----------------------------------------------------------------------
+            
     # ----------------------------------------------------------------------
     def saveBigGD(self, bigDfile='kinematicG.data', bigGfile='kinematicG.gf', 
                         dtype='np.float64'):
