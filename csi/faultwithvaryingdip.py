@@ -234,4 +234,47 @@ class faultwithvaryingdip(RectangularPatches):
         # All done
         return
 
+    def writeFault2File(self, filename):
+        '''
+        Write the patch center coordinates in an ascii file with the format use 
+        in RectangularPatchesKin
+        the file format is so that it can by used directly in psxyz (GMT).
+
+        Args:
+            * filename      : Name of the file.
+
+        Kwargs:
+            * slip          : Put the slip as a value for the color. Can be None, strikeslip, dipslip, total, coupling
+            * scale         : Multiply the slip value by a factor.
+
+        Retunrs:
+            * None
+        '''
+
+        # Write something
+        print('Writing geometry to file {}'.format(filename))
+
+        # Open the file
+        fout = open(filename, 'w')
+
+        #Read Header
+        fout.write('#lon lat E[km] N[km] Dep[km] strike dip Area ID \n')
+        # Loop over the patches
+        nPatches = len(self.patch)
+        for patch in self.patch:
+
+            # Get patch index
+            pIndex = self.getindex(patch)
+
+            # Get patch center
+            xc, yc, zc = self.getcenter(patch)
+            lonc, latc = self.xy2ll(xc, yc)
+            strike = self.getpatchgeometry(patch)[5]
+            dip = self.getpatchgeometry(patch)[6]
+            # Write the string to file
+            fout.write('{0:5.3f} {1:5.3f} {2:5.3f} {3:5.3f} {4:5.2f} {5:5.2f} {6:5.2f} {7:5.2f} {8:5d} \n'.format(lonc, latc,xc, yc, zc, np.rad2deg(strike),np.rad2deg(dip),self.area[pIndex],pIndex))
+
+            # Close the file
+        fout.close()
+        return
 #EOF
