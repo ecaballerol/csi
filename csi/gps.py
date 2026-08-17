@@ -13,7 +13,7 @@ import copy
 import sys
 from os.path import join
 import shapely.geometry as geom
-
+import re
 # Personals
 from .SourceInv import SourceInv
 from .gpstimeseries import gpstimeseries
@@ -3879,7 +3879,129 @@ class gps(SourceInv):
             list(gp_out.timeseries[s].time) for s in gp_out.timeseries
         ])).tolist()
 
+
+    def combineNetworksTimeSeriesv2(self, gpsdata, newNetworkName='Combined Network',
+                                operation='sum', include_replicates=False):
+        '''
+        Combine the time series of multiple networks into a new network.
+        Uses the UNION of all time axes: dates present in only one network
+        keep their original values; dates present in multiple networks are
+        combined according to the operation.
+    
+        Args:
+            * gpsdata            : List of gps instances (each must have .timeseries initialized).
+    
+        Kwargs:
+            * newNetworkName     : Name of the returned network.
+            * operation          : 'sum' or 'subtract'. If 'subtract', subtracts the second
+                                network's time series from the first (self).
+            * include_replicates : If True, also combine replicate time series (keys matching
+                                '{station}_{NNN}') from self with the canonical '{station}'
+                                entries from the other networks. This is intended for the case
+                                where self contains perturbed replicates produced by
+                                simulateTimeSeriesFromCMTWithRandomPerturbation and the other
+                                networks contain a single real (unperturbed) displacement that
+                                should be added to every replicate.
+    
+                                Each output replicate '{station}_{NNN}' is the combination of:
+                                    - self.timeseries['{station}_{NNN}']  (the perturbation)
+                                    - gp.timeseries['{station}']          (the real displacement)
+                                for every gp in gpsdata that contains '{station}'.
+    
+                                Stations with no replicates in self are combined as usual.
+    
+        Returns:
+            * gp_out             : New gps instance with combined time series.
+        '''
+    
+        # --- 1. Build the full list of networks (self + the ones passed as argument) ---
+        all_gps = [self] + gpsdata
+    
+        # Regex that identifies replicate keys: e.g. 'NZWN_042'
+        replicate_pattern = re.compile(r'^(.+)_(\d{3})$')
+    
+        # --- 2. Collect canonical station names across all networks ---
+        # We deliberately exclude replicate keys from this list so that
+        # NZWN_000 etc. don't accidentally get treated as canonical stations.
+        all_canonical = set()
+        for gp in all_gps:
+            for key in gp.timeseries:
+                if not replicate_pattern.match(key):
+                    all_canonical.add(key)
+        canonical_stations = sorted(all_canonical)
+    
+        # --- 3. Create the new network and copy station coordinates ---
+        gp_out = gps(newNetworkName,
+                    utmzone=self.utmzone,
+                    verbose=self.verbose,
+                    lon0=self.lon0,
+                    lat0=self.lat0)
+    
+        Names, Lons, Lats = [], [], []
+        for station in canonical_stations:
+            for gp in all_gps:
+                if station in gp.station:
+                    idx = np.flatnonzero(gp.station == station)[0]
+                    Names.append(station)
+                    Lons.append(gp.lon[idx])
+                    Lats.append(gp.lat[idx])
+                    break
+        gp_out.setStat(np.array(Names), np.array(Lons), np.array(Lats))
+    
+        # --- 4. Combine canonical station time series (unchanged logic) ---
+        gp_out.timeseries = {}
+    
+        for station in canonical_stations:
+            ts_list = [gp.timeseries[station]
+                    for gp in all_gps
+                    if station in gp.timeseries]
+    
+            if len(ts_list) == 0:
+                continue
+            if len(ts_list) == 1:
+                gp_out.timeseries[station] = copy.deepcopy(ts_list[0])
+                continue
+    
+            gp_out.timeseries[station] = self.__combine_ts_list__(ts_list, operation)
+    
+        # --- 5. Optionally combine replicates from self with canonical entries from gpsdata ---
+        if include_replicates:
+    
+            # Collect every replicate key that lives in self
+            replicate_keys_in_self = [k for k in self.timeseries
+                                    if replicate_pattern.match(k)]
+    
+            for rep_key in replicate_keys_in_self:
+                m         = replicate_pattern.match(rep_key)
+                base      = m.group(1)   # e.g. 'NZWN'
+    
+                # Start the list with the replicate from self
+                ts_list = [self.timeseries[rep_key]]
+    
+                # Then append the CANONICAL entry for the same base station
+                # from every other network that has it
+                for gp in gpsdata:
+                    if base in gp.timeseries:
+                        ts_list.append(gp.timeseries[base])
+    
+                if len(ts_list) == 1:
+                    # No matching canonical entry found in any other network — just copy
+                    gp_out.timeseries[rep_key] = copy.deepcopy(ts_list[0])
+                else:
+                    gp_out.timeseries[rep_key] = self.__combine_ts_list__(ts_list, operation)
+    
+        # --- 6. Rebuild the global time vector of the new network ---
+        # Use datetime64 for safe np.unique on datetime objects (same as _combine_ts_list).
+        all_ts_times = np.concatenate([
+            np.array(gp_out.timeseries[s].time, dtype='datetime64[us]')
+            for s in gp_out.timeseries
+        ])
+        gp_out.time = np.unique(all_ts_times).astype('datetime64[us]').tolist()
+    
         return gp_out
+
+
+
 
     def simulateTimeSeriesFromCMTWithRandomPerturbation(self, sismo, N, xstd=10., ystd=10., depthstd=10., Moperc=30., scale=1., verbose=True, plot='jhasgc', elasticstructure='okada', relative_location_is_ok=False, offsetfile=None, offsetdate=None, scaleoffset=1.):
         '''
@@ -4231,5 +4353,129 @@ class gps(SourceInv):
 
         # All done
         return subself
+    
+    @staticmethod 
+    def __combine_ts_list__(ts_list, operation):
+        '''
+        Combine a list of gpstimeseries objects into a single one.
+        All ENU components and (if present) LOS are merged on the UNION time axis.
+        Errors are propagated in quadrature. The first element of ts_list is always
+        the base (added); subsequent elements are added ('sum') or subtracted ('subtract').
+    
+        Time axes are assumed to contain datetime.datetime objects. Internally they are
+        converted to datetime64[us] for safe, fast numpy set operations, then converted
+        back to datetime.datetime on output.
+        '''
+    
+        if len(ts_list) == 0:
+            raise ValueError('ts_list is empty')
+    
+        op = operation.lower()
+        if op not in ('sum', 'subtract', 'sub'):
+            raise NotImplementedError(
+                f"operation='{operation}' is not implemented. Use 'sum' or 'subtract'.")
+    
+        # Sign convention: first ts is always added; rest follow the operation.
+        signs = np.ones(len(ts_list)) if op == 'sum' \
+                else np.array([1.0] + [-1.0] * (len(ts_list) - 1))
+    
+        # ------------------------------------------------------------------
+        # Helper: convert a list of datetime.datetime to datetime64[us],
+        # build the sorted union, and return it as datetime64[us].
+        # datetime64 is safe for np.intersect1d (unlike object arrays).
+        # ------------------------------------------------------------------
+        def to_dt64(time_list):
+            return np.array(time_list, dtype='datetime64[us]')
+    
+    
+        # ------------------------------------------------------------------
+        # Helper: run the vectorized accumulation for one set of series.
+        # series_with_signs : list of (component_timeseries_object, sign)
+        # union_time        : datetime64[us] array
+        # ------------------------------------------------------------------
+        def accumulate(series_with_signs, union_time):
+            val_sum = np.zeros(len(union_time))
+            var_sum = np.zeros(len(union_time))
+    
+            for s, sgn in series_with_signs:
+                t   = to_dt64(s.time)
+                v   = np.asarray(s.value)
+                err = np.asarray(s.error) \
+                    if hasattr(s, 'error') and s.error is not None \
+                    else np.zeros_like(v)
+    
+                # intersect1d returns (intersection, idx_in_ar1, idx_in_ar2)
+                _, idx_union, idx_local = np.intersect1d(
+                    union_time, t, return_indices=True)
+    
+                if len(idx_union) == 0:
+                    continue
+    
+                val_sum[idx_union] += sgn * v[idx_local]
+                var_sum[idx_union] += err[idx_local] ** 2
+    
+            return val_sum, np.sqrt(var_sum)
+    
+        ts_out = copy.deepcopy(ts_list[0])
+    
+        # ==================== ENU components ====================
+        for comp in ('east', 'north', 'up'):
+    
+            # Collect (component_object, sign) pairs, skipping missing components.
+            # Signs are taken from the pre-built array by position in ts_list,
+            # so we zip ts_list with signs directly — the sign is always paired
+            # with the right network regardless of which components are present.
+            comp_with_signs = [
+                (getattr(ts, comp), sgn)
+                for ts, sgn in zip(ts_list, signs)
+                if hasattr(ts, comp) and getattr(ts, comp) is not None
+            ]
+    
+            if not comp_with_signs:
+                continue
+    
+            # Build union from component-level times (not top-level ts.time,
+            # which can differ after processing).
+            union_time = to_dt64(comp_with_signs[0][0].time)
+    
+            val_sum, err_out = accumulate(comp_with_signs, union_time)
+    
+            comp_out       = getattr(ts_out, comp)
+            comp_out.time  = union_time.astype('datetime64[us]').tolist()
+            comp_out.value = val_sum
+            comp_out.error = err_out
+    
+        # Top-level time axis = union of all ENU component time axes
+        all_comp_times = [
+            to_dt64(getattr(ts_out, c).time)
+            for c in ('east', 'north', 'up')
+            if hasattr(ts_out, c) and getattr(ts_out, c) is not None
+        ]
+        if all_comp_times:
+            ts_out.time = np.unique(
+                np.concatenate(all_comp_times)
+            ).astype('datetime64[us]').tolist()
+    
+        # ==================== LOS (optional) ====================
+        if hasattr(ts_list[0], 'los') and ts_list[0].los is not None:
+    
+            los_with_signs = [
+                (ts.los, sgn)
+                for ts, sgn in zip(ts_list, signs)
+                if hasattr(ts, 'los') and ts.los is not None
+            ]
+    
+            if los_with_signs:
+                union_time = to_dt64(los_with_signs[0][0].time)
+    
+                val_sum, err_out = accumulate(los_with_signs, union_time)
+    
+                los_out       = copy.deepcopy(los_with_signs[0][0])
+                los_out.time  = union_time.astype('datetime64[us]').tolist()
+                los_out.value = val_sum
+                los_out.error = err_out
+                ts_out.los    = los_out
+    
+        return ts_out
 
 #EOF
