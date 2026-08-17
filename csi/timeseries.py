@@ -739,7 +739,7 @@ class timeseries(SourceInv):
         self.time = np.delete(np.array(self.time), u).tolist()
         self.value = np.delete(self.value, u)
         self.error = np.delete(self.error, u)
-        if hasattr(self, 'synth'):
+        if hasattr(self, 'synth') and self.synth is not None:
             self.synth = np.delete(self.synth, u)
 
         # All done
