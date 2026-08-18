@@ -2014,7 +2014,7 @@ class RectangularPatches(Fault):
             vs *= -1
 
         # Get the strike assuming dipping to the east
-        strike = np.arctan2(vs[0], vs[1]) - np.pi
+        strike = np.arctan2(vs[0], vs[1])
         # strike = np.arctan2(-normal[0], normal[1]) - np.pi
         if strike < 0.:
             strike += 2*np.pi
