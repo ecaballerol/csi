@@ -396,7 +396,8 @@ def sum_layered(xs, ys, zs, strike, dip, rake, slip, width, length,\
     
     tensile_flag = int(tensile)
     
-    cmd = '{}/sum_layered {} {} {} {} {} {} {}'.format(BIN_EDKS, edks_link, prefix, nrec, Np, npw, npy, tensile_flag)
+    # cmd = '{}/sum_layered {} {} {} {} {} {} {}'.format(BIN_EDKS, edks_link, prefix, nrec, Np, npw, npy, tensile_flag)
+    cmd = '{}/sum_layered {} {} {} {} {} {}'.format(BIN_EDKS, edks_link, prefix, nrec, Np, npw, npy)
     
     if verbose:
         print(cmd)
