@@ -105,7 +105,7 @@ def unit_moment(mu_pa, area_m2, slip_m=1.0):
     M0_dyne_cm = M0_Nm * 1e7                   # 1 N*m = 1e7 dyne*cm
     Mw = (np.log10(M0_dyne_cm) - 16.1) / 1.5   # Kanamori (1977), inverted
     m0 = 10.0 ** (1.5 * Mw + 16.1 - 20.0)      # syn.c's own scaling, verbatim
-    return m0,Mw
+    return m0
 
 
 def build_fk_static_database(model_file, model_3rd_col, depths, distances, output_path,
@@ -207,9 +207,12 @@ def build_fk_static_database(model_file, model_3rd_col, depths, distances, outpu
 
         dist_args = ['{:.4f}'.format(d) for d in distances]
 
+        model_arg = '{}/{}'.format(model_file, depth)
+        if model_3rd_col:
+            model_arg += '/' + model_3rd_col
         cmd = [
             fk_pl_path,
-            '-M{}/{}/{}'.format(model_file, depth, model_3rd_col),
+            '-M{}'.format(model_arg),
             '-N{}/1000/1/{}'.format(nft, dk),
             '-P{}/{}/{}'.format(pmin, pmax, kc),
             '-S{}'.format(src_type),
@@ -218,7 +221,7 @@ def build_fk_static_database(model_file, model_3rd_col, depths, distances, outpu
         if verbose:
             print('[{}/{}] depth={} km'.format(i + 1, ndepth, depth))
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd,env=env,capture_output=True, text=True)
 
         if result.returncode != 0:
             raise RuntimeError(
