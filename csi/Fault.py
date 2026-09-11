@@ -26,7 +26,7 @@ from .SourceInv import SourceInv
 from .EDKSmp import sum_layered
 from .EDKSmp import dropSourcesInPatches as Patches2Sources
 from .EDKSmp import interpolateEDKS
-
+from .FKmp import *
 
 def _edks_chunk_worker(args):
 
@@ -1267,6 +1267,10 @@ class Fault(SourceInv):
         elif method in ('empty'):
             
             G = self.emptyGFs(data, vertical=vertical, slipdir=slipdir, verbose=verbose)
+            
+        elif method in ('fk', 'FK'):
+            G = self.fkGFs(data, vertical=vertical, slipdir=slipdir, verbose=verbose,
+                    convergence=convergence, Nworkers=Nworkers)
 
         # Separate the Green's functions for each type of data set
         data.setGFsInSource(self, G, vertical=vertical)
@@ -2032,6 +2036,130 @@ class Fault(SourceInv):
                                convergence=convergence, vertical=vertical)
 
         # All done
+        return G
+
+    def fkGFs(self, data, vertical=True, slipdir='sd', verbose=True,
+          convergence=None, Nworkers=None):
+        '''
+        Builds Green's functions using Lupei Zhu's fk static solution,
+        mirroring edksGFs's structure so it slots into buildGFs the same
+        way 'edks' does.
+
+        Required beforehand:
+            - self.kernelsFK : path to a .npz database from
+                                FKmp.build_fk_static_database().
+            - self.mu        : set via self.setmu(model_file, tents=True,
+                                format='FK') -- one mu per point source.
+            One of:
+            - self.sourceSpacing / self.sourceNumber / self.sourceArea
+            (same as edksGFs -- consumed by the same Patches2Sources).
+
+        Kwargs:
+            * slipdir : 's' and/or 'd' only -- 't' (tensile) is not
+                        supported (fk.f's src_type=2 double-couple has no
+                        tensile equivalent).
+
+        Returns:
+            * G : same dict structure edksGFs returns.
+        '''
+
+        if data.dtype not in ('insar', 'gps', 'opticor', 'tsunami', 'multigps'):
+            return None
+
+        if 't' in slipdir:
+            raise NotImplementedError(
+                "fkGFs does not support tensile sources (fk.f's src_type=2 "
+                "double-couple has no tensile equivalent) -- drop 't' from "
+                "slipdir, or use method='edks'/'okada' for that component.")
+
+        if verbose:
+            print('---------------------------------')
+            print("Building Green's functions for the data set")
+            print("{} of type {} using FK on fault {}".format(data.name, data.dtype, self.name))
+
+        if not hasattr(self, 'kernelsFK'):
+            print('self.kernelsFK not set -- point it at a .npz database '
+                'built by build_fk_static_database() first.')
+            sys.exit(1)
+        assert os.path.isfile(self.kernelsFK), 'FK database not found: {}'.format(self.kernelsFK)
+
+        if not hasattr(self, 'mu'):
+            print("self.mu not set -- call self.setmu(model_file, "
+                "tents=True, format='FK') before fkGFs.")
+            sys.exit(1)
+
+        if not hasattr(self, 'sourceSpacing') and not hasattr(self, 'sourceNumber') \
+                and not hasattr(self, 'sourceArea'):
+            print('Need sourceSpacing, sourceNumber, or sourceArea set, '
+                'same as edksGFs.')
+            sys.exit(1)
+
+        # Receivers stay in km -- see sum_layered's own docstring ("xr: m,
+        # east coordinate...") for why edksGFs converts to meters; our
+        # consumer (FKGreenFunctionDB / dc_radiat) is km-native instead,
+        # so that conversion step is simply skipped here.
+        xr = data.x
+        yr = data.y
+
+        # Own cache (self.fkSources, NOT self.edksSources): setmu(...,
+        # tents=True) populates self.edksSources in EDKS's meters/degrees
+        # convention as a side effect -- reusing it here would silently
+        # feed meters into a km-native lookup.
+        if self.keepTrackOfSources and hasattr(self, 'fkSources'):
+            if verbose:
+                print('Get sources from saved fk sources')
+            Ids, xs, ys, zs, strike, dip, Areas = self.fkSources
+        else:
+            if verbose:
+                print('Subdividing patches into point sources')
+            Ids, xs, ys, zs, strike, dip, Areas = Patches2Sources(self, verbose=verbose, Nworkers=Nworkers)
+            strike = strike * 180. / np.pi   # dc_radiat wants degrees
+            dip = dip * 180. / np.pi
+            self.fkSources = [Ids, xs, ys, zs, strike, dip, Areas]   # xs/ys/zs/Areas stay km
+
+        if verbose:
+            print('{} sources for {} patches and {} data points'.format(
+                len(Ids), len(self.patch), len(xr)))
+
+        mu = np.asarray(self.mu)
+        assert len(mu) == len(Ids), (
+            'self.mu has {} entries but there are {} point sources -- did '
+            "you call setmu(..., tents=True)?".format(len(mu), len(Ids)))
+
+        db = FKGreenFunctionDB(self.kernelsFK)
+        source_map = {Id: np.flatnonzero(Ids == Id) for Id in np.unique(Ids)}
+        n_patch = np.unique(Ids).shape[0]
+
+        def _patch_sum(rake_value):
+            Z, N, E = synthesize_static(db, xs, ys, zs, strike, dip, rake_value,
+                                        mu, Areas, xr, yr)
+            # [E, N, Z(up)] matches sum_layered's own [ux,uy,uz]=East,North,Up
+            G_patch = np.zeros((3, len(xr), n_patch))
+            for Id, idx in source_map.items():
+                G_patch[0, :, Id] = E[idx, :].sum(axis=0)
+                G_patch[1, :, Id] = N[idx, :].sum(axis=0)
+                G_patch[2, :, Id] = Z[idx, :].sum(axis=0)
+            return G_patch
+
+        if 's' in slipdir:
+            if verbose:
+                print('Running Strike Slip component for data set {}'.format(data.name))
+            Gss = _patch_sum(0.0)
+        else:
+            Gss = np.zeros((3, len(data.x), len(self.patch)))
+
+        if 'd' in slipdir:
+            if verbose:
+                print('Running Dip Slip component for data set {}'.format(data.name))
+            Gds = _patch_sum(90.0)
+        else:
+            Gds = np.zeros((3, len(data.x), len(self.patch)))
+
+        Gts = np.zeros((3, len(data.x), len(self.patch)))   # guarded above
+
+        G = self._buildGFsdict(data, Gss, Gds, Gts, slipdir=slipdir,
+                                convergence=convergence, vertical=vertical)
+
         return G
     # ----------------------------------------------------------------------
 
@@ -3602,7 +3730,7 @@ class Fault(SourceInv):
     # ----------------------------------------------------------------------
 
     # ----------------------------------------------------------------------
-    def setmu(self, model_file, tents = False):
+    def setmu(self, model_file, tents = False,format="EDKS"):
         '''
         Gets the shear modulus corresponding to each patch using a model
         file from the EDKS software. Shear moduli are set in self.mu
@@ -3630,6 +3758,7 @@ class Fault(SourceInv):
         Args:
             * model_file    : path to model file
             * tents         : if True, set mu values every point source in patches
+            * format        : format of the model file ('EDKS' or 'other')
 
         Returns:
             * None
@@ -3639,28 +3768,51 @@ class Fault(SourceInv):
         mu = []
         depth  = 0.
         depths = []
-        with open(model_file) as f:
-            L = f.readlines()
-            items = L[0].strip().split()
-            N = int(items[0])
-            F = float(items[1])
-            for l in L[1:]:
-                c = l.strip()
-                if len(c) and c[0]=='#':
-                    continue
-                items = c.split()
-                if len(items)!=4:
-                    continue
-                TH  = float(items[3])*F
-                VS  = float(items[2])*F
-                RHO = float(items[0])*F
-                mu.append(VS*VS*RHO)
-                if TH==0.:
-                    TH = np.inf
-                depths.append([depth,depth+TH])
-                depth += TH
-        depths = np.array(depths)*1e-3 # depth in km
-        Nd = len(depths)
+        if format=="EDKS":
+            with open(model_file) as f:
+                L = f.readlines()
+                items = L[0].strip().split()
+                N = int(items[0])
+                F = float(items[1])
+                for l in L[1:]:
+                    c = l.strip()
+                    if len(c) and c[0]=='#':
+                        continue
+                    items = c.split()
+                    if len(items)!=4:
+                        continue
+                    TH  = float(items[3])*F
+                    VS  = float(items[2])*F
+                    RHO = float(items[0])*F
+                    mu.append(VS*VS*RHO)
+                    if TH==0.:
+                        TH = np.inf
+                    depths.append([depth,depth+TH])
+                    depth += TH
+            depths = np.array(depths)*1e-3 # depth in km
+            Nd = len(depths)
+
+        elif format=="FK":
+            with open(model_file) as f:
+                L = f.readlines()
+                for l in L[0:]:
+                    c = l.strip()
+                    if len(c) and c[0]=='#':
+                        continue
+                    items = c.split()
+                    if len(items) < 4:
+                        continue
+                    TH  = float(items[0])
+                    VS  = float(items[1])
+                    RHO = float(items[3])
+                    mu.append(VS*VS*RHO*1.0e9)
+                    if TH==0.:
+                        TH = np.inf
+                    depths.append([depth,depth+TH])
+                    depth += TH
+            depths = np.array(depths) # depth in km already
+            Nd = len(depths)
+
         if tents:
             if self.keepTrackOfSources and hasattr(self, 'edksSources'):
                 Ids, xs, ys, zs, strike, dip, Areas = self.edksSources[:7]
