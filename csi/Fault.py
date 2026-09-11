@@ -2083,9 +2083,8 @@ class Fault(SourceInv):
             sys.exit(1)
         assert os.path.isfile(self.kernelsFK), 'FK database not found: {}'.format(self.kernelsFK)
 
-        if not hasattr(self, 'mu'):
-            print("self.mu not set -- call self.setmu(model_file, "
-                "tents=True, format='FK') before fkGFs.")
+        if self.mu is None:
+            print("self.mu not set -- call self.setmu with format='FK') before fkGFs.")
             sys.exit(1)
 
         if not hasattr(self, 'sourceSpacing') and not hasattr(self, 'sourceNumber') \
@@ -3814,22 +3813,31 @@ class Fault(SourceInv):
             Nd = len(depths)
 
         if tents:
-            if self.keepTrackOfSources and hasattr(self, 'edksSources'):
-                Ids, xs, ys, zs, strike, dip, Areas = self.edksSources[:7]
+            if format=="EDKS":
+                if self.keepTrackOfSources and hasattr(self, 'edksSources'):
+                    Ids, xs, ys, zs, strike, dip, Areas = self.edksSources[:7]
 
-            else:
-                Ids, xs, ys, zs, strike, dip, Areas = Patches2Sources(self)
-                # All these guys need to be in meters
-                xs *= 1000. ; ys *= 1000. ; zs *= 1000.
-                Areas *= 1e6
-                # Strike and dip in degrees
-                strike = strike*180./np.pi
-                dip = dip*180./np.pi
-                # Keep track?
-                self.edksSources = [Ids, xs, ys, zs, strike, dip, Areas]
+                else:
+                    Ids, xs, ys, zs, strike, dip, Areas = Patches2Sources(self)
+                    # All these guys need to be in meters
+                    xs *= 1000. ; ys *= 1000. ; zs *= 1000.
+                    Areas *= 1e6
+                    # Strike and dip in degrees
+                    strike = strike*180./np.pi
+                    dip = dip*180./np.pi
+                    # Keep track?
+                    self.edksSources = [Ids, xs, ys, zs, strike, dip, Areas]
 
-            Np = len(self.edksSources[0])
-
+                Np = len(self.edksSources[0])
+            elif format=="FK":
+                if self.keepTrackOfSources and hasattr(self, 'fkSources'):
+                    Ids, xs, ys, zs, strike, dip, Areas = self.fkSources
+                else:
+                    Ids, xs, ys, zs, strike, dip, Areas = Patches2Sources(self)
+                    strike = strike * 180. / np.pi
+                    dip = dip * 180. / np.pi
+                    self.fkSources = [Ids, xs, ys, zs, strike, dip, Areas]  # stays km        
+                Np = len(self.fkSources[0])
         else:
             Np = len(self.patch)
 
@@ -3837,7 +3845,7 @@ class Fault(SourceInv):
         self.mu = np.zeros((Np,))
         for p in range(Np):
             if tents:
-               p_z = zs[p]/1000.
+               p_z = zs[p] if format == 'FK' else zs[p] / 1000.
             else:
                 p_x, p_y, p_z,width, length, strike_rad, dip_rad = self.getpatchgeometry(p,center=True)
 
