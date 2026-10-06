@@ -4095,7 +4095,7 @@ class RectangularPatches(Fault):
                         D[p,ind] = 1.0/nbot
                     else:
                         D[p,ind] = 1.0
-            D[p,p] = -4
+            D[p,p] = -4.0
 
         return D
     # ----------------------------------------------------------------------
